@@ -45,5 +45,5 @@ claude plugin install claude-animation@claude-animation-skill
 
 ## References
 `references/` (gitignored, study only): PDoomVideo, ClaudeAnimationBase, claude-animation-skill,
-hyperframes, Battle-of-Austerlitz-Film, awesome-ai-motion (prompt library), awesome-opus-5-5-videos (dataset).
+hyperframes (skills only — motion-doctrine, cut-the-curve, seam-craft, music-to-video), Battle-of-Austerlitz-Film, awesome-ai-motion (prompt library), awesome-opus-5-5-videos (dataset).
 Re-clone with `git clone --depth 1 https://github.com/<owner>/<repo> references/<repo>`.

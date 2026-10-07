@@ -18,7 +18,8 @@ Ask only for what is missing; sensible defaults: 15s, 9:16 first, synthesized mu
 3. If a reference exists, write docs/style_guide.md from it (prompts/03-reference.md).
 4. Music: edit audio/score.json (sections, chords, key) or drop audio/track.wav and run
    `npm run beats -- films/<name>/audio/track.wav > films/<name>/audio/beats.json`.
-5. Write docs/shotlist.md on the beat grid: per shot time range, event, reads, transition, SFX.
+5. Write docs/shotlist.md on the beat grid: per shot time range, event, reads, sustained-motion route,
+   SFX, and the seam out of it (cut the curve in CURRENT by default; reserved vectors only with a reason).
    Show it and wait for OK.
 6. Build index.html with lib/motion.js springs, laid out in `u` units for every format.
    Put SFX cues in audio/cues.json on beats/hits.

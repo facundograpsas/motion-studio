@@ -19,12 +19,18 @@ def main(path: str) -> None:
     peaks = librosa.util.peak_pick(
         onset, pre_max=3, post_max=3, pre_avg=3, post_avg=5, delta=0.5, wait=10
     )
+    # energy at 2 Hz, 0-1: on calm tracks the beat grid is a metronome the tracker imposed —
+    # pace by energy and phrases instead, never hard-cut to it
+    rms = librosa.feature.rms(y=y, hop_length=sr // 2)[0]
+    energy = [round(float(v), 3) for v in rms / (rms.max() or 1)]
+
     json.dump(
         {
             "bpm": float(np.atleast_1d(tempo)[0]),
             "beats": beats,  # state changes go here
             "downbeats": beats[::4],  # big moments go here
             "hits": librosa.frames_to_time(peaks, sr=sr).round(3).tolist(),  # SFX go here
+            "energy": energy,  # one value per 0.5s
             "duration": round(float(len(y) / sr), 3),
         },
         sys.stdout,

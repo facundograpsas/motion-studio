@@ -1,0 +1,5 @@
+{ "bpm": 120, "dur": 8, "seed": 3, "key": "A", "scale": "minor", "chords": [0, 5, 3, 4],
+  "sections": [
+    { "from": 0, "to": 2, "layers": ["pad", "kick"] },
+    { "from": 2, "to": 7, "layers": ["pad", "kick", "hat", "bass", "arp"] },
+    { "from": 7, "to": 8, "layers": ["pad"] } ] }

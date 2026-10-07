@@ -1,0 +1,32 @@
+{
+  "name": "motion-studio",
+  "version": "1.0.0",
+  "description": "",
+  "directories": {
+    "doc": "docs",
+    "lib": "lib"
+  },
+  "scripts": {
+    "new": "node tools/new.ts",
+    "preview": "node tools/preview.ts",
+    "draft": "node tools/render.ts --draft",
+    "render": "node tools/render.ts",
+    "finalize": "node tools/finalize.ts",
+    "film": "node tools/film.ts",
+    "review": "node tools/review.ts",
+    "music": "node tools/music.ts",
+    "sfx": "node tools/sfx.ts",
+    "beats": ".venv/bin/python -I tools/beats.py",
+    "typecheck": "tsc --noEmit"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "module",
+  "devDependencies": {
+    "@types/node": "^26.6.4",
+    "playwright": "^1.63.0",
+    "typescript": "^7.0.2"
+  },
+  "private": true
+}

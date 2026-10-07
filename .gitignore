@@ -1,0 +1,11 @@
+node_modules/
+.venv/
+references/
+out/
+films/*/out/
+.env
+.env.*
+!.env.example
+.DS_Store
+films/*/audio/music.wav
+films/*/audio/sfx.wav

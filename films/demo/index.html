@@ -1,0 +1,72 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>film</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter+Tight:wght@500;800&family=Source+Serif+4:opsz,wght@8..60,700&display=block" rel="stylesheet">
+<style>html,body{margin:0;background:#141413;overflow:hidden}canvas{display:block;max-width:100vw;max-height:100vh;margin:auto}</style>
+<canvas id="c"></canvas>
+<script type="module">
+import { clamp, spring, springP, track, swapAlpha, rng, format, loadJSON, mountFilm } from '/lib/motion.js';
+
+// ---- Film settings --------------------------------------------------------
+const DUR = 8;
+const PAL = { bg: '#141413', ink: '#F0EEE6', accent: '#D97757', mute: '#3D3D3A' };
+const DISPLAY = '"Source Serif 4", serif', UI = '"Inter Tight", sans-serif';
+
+const { W, H, u, cx, cy, vertical } = format();
+const cv = document.getElementById('c');
+cv.width = W; cv.height = H;
+const g = cv.getContext('2d');
+let beats = { bpm: 120, beats: [] };
+
+// ---- Scenes: one object per shot, times local to the scene -----------------
+const SCENES = [
+  { from: 0, to: 2.5, draw(t) {                        // hook: kinetic title
+      const s = springP(t - 0.1, 'heavy');
+      g.save(); g.translate(cx, cy); g.scale(0.7 + 0.3 * s, 0.7 + 0.3 * s);
+      g.globalAlpha = clamp(t * 5);
+      g.fillStyle = PAL.ink; g.font = `700 ${18 * u}px ${DISPLAY}`;
+      g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText('MOTION', 0, 0);
+      const bar = springP(t - 0.35, 'snappy');
+      g.fillStyle = PAL.accent; g.fillRect(-30 * u * bar, 11 * u, 60 * u * bar, 1.6 * u);
+      g.restore();
+  }},
+  { from: 2.5, to: 5, draw(t) {                        // grid on a stagger
+      const r = rng(7), cols = vertical ? 6 : 10, rows = vertical ? 8 : 5, cell = Math.min(W / (cols + 1), H / (rows + 1));
+      for (let i = 0; i < cols * rows; i++) {
+        const x = cx + ((i % cols) - (cols - 1) / 2) * cell, y = cy + (Math.floor(i / cols) - (rows - 1) / 2) * cell;
+        const s = spring(t - i * 0.02 - r() * 0.1, 260, 20) * (1 - spring(t - 2.1 - i * 0.008, 300, 30));
+        g.fillStyle = i % 7 ? PAL.ink : PAL.accent;
+        const h = cell * 0.36 * s; g.fillRect(x - h, y - h, 2 * h, 2 * h);
+      }
+  }},
+  { from: 5, to: 8, draw(t) {                          // one shape, never cut: pill morphs through states
+      const keys = (a, b, c) => [[0, a], [0.6, b], [1.6, c]];
+      const w = track(t, keys(8 * u, 60 * u, 14 * u), 'base');
+      const h = track(t, keys(8 * u, 14 * u, 14 * u), 'base');
+      const rad = track(t, keys(4 * u, 7 * u, 7 * u), 'snappy');
+      const out = spring(t - 2.5, 220, 28);               // collapse at the end so frame 8s = frame 0s
+      g.save(); g.translate(cx, cy); g.scale(1 - out, 1 - out);
+      g.fillStyle = PAL.accent; g.beginPath(); g.roundRect(-w / 2, -h / 2, w, h, rad); g.fill(); g.clip(); // content never leaves the shape
+      g.fillStyle = PAL.bg; g.font = `800 ${5 * u}px ${UI}`; g.textAlign = 'center'; g.textBaseline = 'middle';
+      g.globalAlpha = swapAlpha(t, 0.6, 1.6); g.fillText('Get started', 0, 0);
+      g.globalAlpha = swapAlpha(t, 1.6, 2.5); g.fillText('✓', 0, 0);
+      g.restore();
+  }},
+];
+
+function draw(t) {
+  g.globalAlpha = 1; g.fillStyle = PAL.bg; g.fillRect(0, 0, W, H);
+  for (const s of SCENES) if (t >= s.from && t < s.to) s.draw(t - s.from);
+}
+
+mountFilm({
+  dur: DUR,
+  async init() {
+    // canvas text only triggers font loading when drawn: load explicitly before frame 0
+    await Promise.all([`700 10px ${DISPLAY}`, `800 10px ${UI}`].map((f) => document.fonts.load(f)));
+    beats = await loadJSON('audio/beats.json', beats);
+  },
+  draw,
+});
+</script>

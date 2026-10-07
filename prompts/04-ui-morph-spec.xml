@@ -1,0 +1,36 @@
+<!-- State-list spec (step 06): one shape, never cut. Pattern from the 907K-view UI morph loop. -->
+<inputs>
+Ask me for: my product + URL, 8 to 12 UI states that tell its story, the real data shown in
+each state, brand colors + fonts + one accent, a royalty-free track near 120 BPM, formats.
+</inputs>
+
+<direction>
+Product-film UI motion. One container never cuts: every state is the same element changing
+size, radius and fill while its content swaps behind a short blur. A cursor drives every change.
+Warm neutral canvas, one accent. Springs with at most a tiny overshoot.
+Banned: bouncy easing, glows, gradients on UI chrome, particle bursts, dead time.
+</direction>
+
+<structure>
+120 BPM, 8 bars, something happens on every beat.
+logo → CTA button → email field (typed) → loader → success check → dashboard card
+→ chart draws itself → tooltip on hover → ⌘K palette → toast → logo.
+</structure>
+
+<build>
+1. One HTML file in films/[name], one canvas, window.seek(t) via mountFilm. No CSS transitions, no timers, no carried state.
+2. Closed-form springs (lib/motion.js). A value with many targets = track(): one spring per change.
+3. Text inside a morphing container enters after the morph starts, leaves before the next one (swapAlpha + clip).
+4. Tab indicators: leading and trailing edges on different springs so they stretch (indicator()).
+5. Beat grid from the track (npm run beats, or audio/score.json). Start on a downbeat. UI sounds on measured hits.
+6. Render with npm run film: headless Chrome at 60 fps, 4 subframes per frame, blended for motion blur.
+</build>
+
+<gotchas>
+Never use will-change on anything the camera scales (blurry text).
+The last frame must equal the first, cursor position and velocity included.
+</gotchas>
+
+<start>
+Ask for the inputs, then show me the state list on the beat grid before writing code.
+</start>

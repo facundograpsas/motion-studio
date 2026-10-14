@@ -4,14 +4,18 @@ Videos made from code: every film is a program that paints any frame on demand; 
 renders it and ffmpeg encodes it. Opus writes the program, renders it, looks at its own frames and fixes them.
 
 ## Layout
+- `films/<name>/timeline.json` — the film's clock: `duration` + one object per scene (`from`, `to` and its named
+  beats, absolute seconds). The picture imports it and `audio/cues.py` reads it, so retiming is one edit.
 - `films/<name>/index.html` — one film. Canvas `#c`, `mountFilm({ dur, init, draw })` from `/lib/motion.js`.
-- `films/<name>/audio/` — `score.json` (synth music) or `track.wav` (supplied), `cues.json` (SFX), `beats.json` (grid).
+- `films/<name>/audio/` — `score.json` (synth music) or `track.wav` (supplied), `cues.py` (SFX cue sheet), `beats.json` (grid).
+  Older films still use `cues.json` (legacy `tools/sfx.ts`); `npm run film` picks whichever exists.
 - `films/<name>/docs/` — `style_guide.md`, `shotlist.md`, `review_log.md` (and `ANIMATION_GUIDE.md` when using subagents).
 - `films/<name>/refs/`, `assets/` — references and real product assets for that film.
 - `films/_template/` — starting point. `films/demo/` — working example of every piece of the pipeline.
 - `lib/motion.js` — springs, `track()`, `indicator()`, `swapAlpha()`, `rng()`, `format()`, beat helpers,
-  seams (`cutCurve()`, `zoomThrough()`), `nudge()`, `waterfall()`.
-- `tools/*.ts` (Node 26 runs TS natively), `tools/beats.py` (uses `.venv`).
+  seams (`cutCurve()`, `zoomThrough()`), `nudge()`, `waterfall()`, `local()` (scene beats → scene-local times).
+- `tools/*.ts` (Node 26 runs TS natively), `tools/beats.py` and `tools/sfx/` (SFX engine, uses `.venv`;
+  adapted from whaleyxbt/claude-motion, MIT).
 - `prompts/` — prompt patterns (one-liner, brand, reference, UI-morph spec, director brief, critique pass).
 - `references/` — cloned repos for study only (gitignored, never run their code from here).
 
@@ -24,6 +28,8 @@ npm run render -- films/<name> [--from 4 --to 6] full quality 60fps, 4 subframes
 npm run film -- films/<name> [--format all]     music → sfx → render → mix -14 LUFS → review sheets
 npm run review -- <video.mp4> [--at 4.2]        contact.png, phone.png, poster.png, loop_check.mp4, strip.png
 npm run beats -- <song.wav> > films/<name>/audio/beats.json
+npm run sfx -- films/<name>                     audio/cues.py + timeline.json → audio/sfx.wav
+npm run sfx -- --list                           SFX generators and what each is for
 ```
 Formats: `9x16` (1080x1920, default), `1x1`, `16x9`, `4x5`. Output: `films/<name>/out/<format>/final.mp4`.
 
@@ -57,7 +63,7 @@ Formats: `9x16` (1080x1920, default), `1x1`, `16x9`, `4x5`. Output: `films/<name
 - Use only 2–3 transition types per film and repeat them. Morphs of a shared element don't count.
 - The incoming scene arrives composed — never empty or a speck at its first frame.
 - Zoom blur: 10px on text-scale subjects, 18–20px only for full-frame surfaces. Same blur both sides of the swap.
-- Template mechanics: scenes paint on the layer `g`; `SEAMS` maps a cut time to its seam; the compositor applies it.
+- Template mechanics: scenes paint on the layer `g`; `SEAMS` maps an incoming scene id to its seam; the compositor applies it.
 
 ## Performance: the scene keeps performing
 - **Product / UI / kinetic-type films:** no idle wobble (breathe, float, glow pulse) to fill time — it reads
@@ -88,8 +94,18 @@ For every shot, list what the viewer must understand, in order. Each read needs 
 understood and registered before the next one starts. One read at a time; fast actions, held
 meanings; lead the eye before an important read. Let the reads set the shot length.
 
+## Timeline
+- Write every beat into `timeline.json` before scene code: scene `from`/`to` plus named moments
+  (`"title": 0.1`, arrays for staggers). Scenes read them through `k` (scene-local, via `local()`); never type
+  a start time inside a scene or a cue sheet. Offsets from a beat (`k.bar + 0.05`) are fine.
+- Retime = edit `timeline.json`, then `npm run sfx` so the sound follows.
+
 ## Sound
-- Score and SFX are synthesized in code (`score.json`, `cues.json`) unless `audio/track.wav` is supplied.
+- Score and SFX are synthesized in code (`score.json`, `cues.py`) unless `audio/track.wav` is supplied.
+- `cues.py` is `score(mix, tl)`: `mix.put(tl["scene"]["beat"], whoosh(...), gain, pan)`, `mix.typing(start, end, chars)`,
+  `mix.put_stereo()` for `pad()`. Gains are relative to the music (kick ~0.8): hero hits 0.8–1, supporting
+  0.3–0.6, chimes/beds ~0.1. Tonal SFX in the key of `score.json`. Accent, don't narrate: drift stays silent.
+  The stem isn't mastered alone — finalize normalizes music + SFX together to -14 LUFS.
 - Place state changes on beats, big moments on downbeats, SFX on hits (`beats.json`). Mix lands at -14 LUFS.
 - Trust the beat grid only when the music is genuinely rhythmic. On calm tracks the grid is a metronome
   the tracker imposed: pace by `energy` (beats.json, 2 Hz) and phrases, and never hard-cut to it.

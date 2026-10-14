@@ -1,4 +1,4 @@
-// Full pipeline for one film: music (if score.json and no supplied track) → sfx → render → finalize.
+// Full pipeline for one film: music (if score.json and no supplied track) → sfx (cues.py, or legacy cues.json) → render → finalize.
 // node tools/film.ts films/<name> [--format 9x16|1x1|16x9|all] [any render.ts flag]
 import { spawnSync } from 'node:child_process';
 import { existsSync, writeFileSync } from 'node:fs';
@@ -27,7 +27,10 @@ if (existsSync(join(audio, 'track.wav'))) {
 } else if (existsSync(join(audio, 'score.json'))) {
   step('music.ts', join(audio, 'score.json'), join(audio, 'music.wav'));
 }
-if (existsSync(join(audio, 'cues.json'))) step('sfx.ts', join(audio, 'cues.json'), join(audio, 'sfx.wav'));
+if (existsSync(join(audio, 'cues.py'))) {
+  const r = spawnSync(join(tools, '..', '.venv', 'bin', 'python'), ['-m', 'sfx', dir], { stdio: 'inherit', env: { ...process.env, PYTHONPATH: tools } });
+  if (r.status !== 0) process.exit(r.status ?? 1);
+} else if (existsSync(join(audio, 'cues.json'))) step('sfx.ts', join(audio, 'cues.json'), join(audio, 'sfx.wav')); // legacy films
 
 for (const f of formats) {
   step('render.ts', film, '--format', f, ...passthrough);

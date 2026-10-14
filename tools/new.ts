@@ -17,8 +17,12 @@ cpSync(join(ROOT, 'films', '_template'), dir, { recursive: true, filter: (src) =
 for (const d of ['audio', 'docs', 'refs', 'assets']) mkdirSync(join(dir, d), { recursive: true });
 const dur = Number(opt.dur), bpm = Number(opt.bpm);
 
-const html = join(dir, 'index.html');
-writeFileSync(html, readFileSync(html, 'utf8').replace(/const DUR = \d+(\.\d+)?;/, `const DUR = ${dur};`));
+// timeline.json is the film's clock (picture + cues.py): set the duration and stretch the last scene to it
+const tlPath = join(dir, 'timeline.json'), tl = JSON.parse(readFileSync(tlPath, 'utf8'));
+tl.duration = dur;
+const scenes = Object.values(tl).filter((v: any) => typeof v === 'object');
+(scenes.at(-1) as any).to = dur;
+writeFileSync(tlPath, JSON.stringify(tl, null, 1) + '\n');
 writeFileSync(join(dir, 'audio', 'score.json'), JSON.stringify({
   bpm, dur, seed: 1, key: 'A', scale: 'minor', chords: [0, 5, 3, 4],
   sections: [
@@ -27,10 +31,10 @@ writeFileSync(join(dir, 'audio', 'score.json'), JSON.stringify({
     { from: dur - 1, to: dur, layers: ['pad'] },
   ],
 }, null, 1));
-writeFileSync(join(dir, 'audio', 'cues.json'), '[\n  {"t": 0.1, "type": "thump"}\n]\n');
 writeFileSync(join(dir, 'docs', 'review_log.md'), `# Review log — ${name}\n\n| round | hook | phone read | motion | variety | composition | brand | sound | 3 worst problems |\n|---|---|---|---|---|---|---|---|---|\n`);
 
 console.log(`✔ films/${name} (${dur}s @ ${bpm} BPM)
   preview:  npm run preview            → http://localhost:5173/films/${name}/
   draft:    npm run draft -- films/${name}
+  sfx:      npm run sfx -- films/${name}      (audio/cues.py on timeline.json)
   final:    npm run film -- films/${name}`);

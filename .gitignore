@@ -9,3 +9,4 @@ films/*/out/
 .DS_Store
 films/*/audio/music.wav
 films/*/audio/sfx.wav
+__pycache__/

@@ -12,6 +12,8 @@ renders it and ffmpeg encodes it. Opus writes the program, renders it, looks at 
 - `films/<name>/docs/` — `style_guide.md`, `shotlist.md`, `review_log.md` (and `ANIMATION_GUIDE.md` when using subagents).
 - `films/<name>/refs/`, `assets/` — references and real product assets for that film.
 - `films/_template/` — starting point. `films/demo/` — working example of every piece of the pipeline.
+- Productions are local only: `films/*` is gitignored except the harness (`_template`, `demo`, the model sheets).
+  This repo never holds a production's content, brand or data.
 - `lib/motion.js` — springs, `track()`, `indicator()`, `swapAlpha()`, `rng()`, `format()`, beat helpers,
   seams (`cutCurve()`, `zoomThrough()`), `nudge()`, `waterfall()`, `local()` (scene beats → scene-local times).
 - `tools/*.ts` (Node 26 runs TS natively), `tools/beats.py` and `tools/sfx/` (SFX engine, uses `.venv`;
@@ -80,6 +82,21 @@ Formats: `9x16` (1080x1920, default), `1x1`, `16x9`, `4x5`. Output: `films/<name
   don't queue: `waterfall()` (gaps shrink ×0.84), heavier elements travel further. Arrivals are binary-on
   with a spring, not fades.
 - Group repositioning: `nudge()` (slow ramp · linear burst · long tail); reveal new content during the burst.
+
+## Characters and vehicles (`lib/rigs/`)
+- Actors are tiny 3D models in iso world units, drawn flat: `iso.ts` (projection, shaded convex solids,
+  `onPlane()` decals, IK), `path.ts` (routes with rounded corners, `cruise()`/`keyed()` motion, `follow()`
+  spring filter, `footsteps()`), `person.ts` (IK skeleton, face, hair, hand targets), `vehicle.ts` (van, car).
+  Written in TS; the preview and render servers strip the types. Model sheet: `films/rig-sheet/` (vehicles).
+- Locomotion is driven by distance, never by time: wheel spin = distance / radius; feet come from
+  `footsteps()`, where a planted foot is a fixed world point (zero slide, verify numerically if you change it).
+  Set a walk's step count in timeline.json so `cues.py` can put footsteps on the plants.
+- Characters are the exception to "no idle wobble": blinks, breathing and weight are allowed on people,
+  never on UI. Act with anticipation (squat before a hop), follow-through (body pitch from `follow()`),
+  and give the other actor room (step back, turn toward them).
+- Sort actors and buildings with footprints (iso AABB rule), not a single depth number; clip an actor to
+  an opening while it is inside something (a door, a dock). Check occlusion before blocking a scene:
+  anything taller between an actor and the camera (a parked van) hides its feet.
 
 ## Look
 - Banned defaults: centered title on gradient, everything fading in, corner labels and frame

@@ -7,6 +7,7 @@ import { chromium, type Page } from 'playwright';
 import { spawn } from 'node:child_process';
 import { createServer } from 'node:http';
 import { readFile, mkdir, rm, writeFile, stat } from 'node:fs/promises';
+import { stripTypeScriptTypes } from 'node:module';
 import { extname, join, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
 
@@ -57,6 +58,8 @@ const server = createServer(async (req, res) => {
   if (!path.startsWith(ROOT)) return res.writeHead(403).end();
   const body = await readFile(path).catch(() => null);
   if (!body) return res.writeHead(404).end();
+  // lib/rigs/*.ts: the browser gets the same file with its types erased
+  if (extname(path) === '.ts') return res.writeHead(200, { 'content-type': 'text/javascript' }).end(stripTypeScriptTypes(body.toString()));
   res.writeHead(200, { 'content-type': MIME[extname(path)] ?? 'application/octet-stream' }).end(body);
 });
 await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));

@@ -1,0 +1,145 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>rig-sheet</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Rubik:wght@600;800&family=JetBrains+Mono:wght@500;600&display=block" rel="stylesheet">
+<style>html,body{margin:0;background:#06122B;overflow:hidden}canvas{display:block;max-width:100vw;max-height:100vh;margin:auto}</style>
+<canvas id="c"></canvas>
+<script type="module">
+import { springP, track, clamp, format, mountFilm, local } from '/lib/motion.js';
+import { isoView, rgba, capsule, taper, sphere } from '/lib/rigs/iso.ts';
+import { vehicle, vehicleGround, doorSill, VAN, CAR, VAN_LOOK as VAN_BRAND, CAR_LOOK } from '/lib/rigs/vehicle.ts';
+import TL from './timeline.json' with { type: 'json' };
+
+// Model sheet for lib/rigs/vehicle.ts: VAN turntable (door, lamps, brake, pitch, steer), CAR turntable,
+// and a VAN driving forward then reversing along a road so wheel spin vs distance reads. Loops at 8 s.
+const DUR = TL.duration, k = local(TL.sheet);
+const PAL = {
+  night: '#06122B', ground: '#0A1A3D', road: '#0E2250', teal: '#43BECB', orange: '#FEA21F', sky: '#8EB6F8',
+  ink: '#F2F6FF', mute: '#7088BB', navy: '#14428E',
+};
+const DISPLAY = '"Rubik", sans-serif', MONO = '"JetBrains Mono", monospace';
+const F = format(1920, 1080), { W, H, u, cx, cy } = F;
+const cv = document.getElementById('c');
+cv.width = W; cv.height = H;
+const g = cv.getContext('2d');
+
+const TW = 8 * u, iso = isoView(TW), ZOOM = Number(new URLSearchParams(location.search).get('zoom')) || 4;   // ?zoom=1.6 = city scale
+// screen offset from the frame centre (in u) → grid point on the ground
+const G = (sx, sy) => { const a = (sx * u / 4) / (TW / 2), b = (sy * u / 4) / (TW / 4); return [(a + b) / 2, (b - a) / 2]; };   // layout at zoom 4
+const SCREEN = (p) => { const [x, y] = iso.p(p); return [cx + x * ZOOM, cy + y * ZOOM]; };
+
+const VAN_LOOK = { ...VAN_BRAND, logo: [] };                              // recommended: white, navy panel, teal stripe
+const DRIVE_LOOK = { body: PAL.teal, accent: PAL.orange, glass: '#1B2F5C', logo: [] };   // alternative: teal body
+
+const P_VAN = G(-52, 10), P_CAR = G(-6, 10), P_DRIVE = G(26, -8), P_MAN = G(-29, 17);
+const L = 1.8;                                              // drive distance
+
+const pulse = (t, at, len = 0.5) => clamp(springP(t - at, 'snappy') - springP(t - at - len, 'snappy'));
+// minimum-jerk travel 0 → 1 over [t0, t1]: position, velocity, acceleration (zero v and a at both ends)
+function minJerk(t, t0, t1) {
+  const T = t1 - t0, p = clamp((t - t0) / T);
+  return [p ** 3 * (10 - 15 * p + 6 * p * p), (30 * p * p * (1 - p) ** 2) / T, (60 * p * (1 - p) * (1 - 2 * p)) / (T * T)];
+}
+
+function vanTurntable(t) {
+  return {
+    pos: P_VAN, heading: Math.PI / 2 + (2 * Math.PI * t) / DUR, wheel: Math.PI * t,
+    door: track(t, [[0, 0], [k.doorOpen, 1], [k.doorClose, 0]], 'base'),
+    lights: 1, brake: k.brake.reduce((a, b) => Math.max(a, pulse(t, b)), 0),
+    pitch: 0.035 * Math.sin(Math.PI * t), steer: 0.3 * Math.sin((Math.PI * t) / 2),
+  };
+}
+function carTurntable(t) {
+  return {
+    pos: P_CAR, heading: (3 * Math.PI) / 4 - (2 * Math.PI * t) / DUR, wheel: -1.25 * Math.PI * t,
+    lights: 1, brake: k.carBrake.reduce((a, b) => Math.max(a, pulse(t, b)), 0),
+    pitch: 0.025 * Math.sin(Math.PI * t + 1), steer: 0.35 * Math.sin((Math.PI * t) / 2),
+  };
+}
+function driveVan(t) {
+  const [f, vf, af] = minJerk(t, k.drive[0], k.drive[1]), [b, vb, ab] = minJerk(t, k.back[0], k.back[1]);
+  const s = L * (f - b), v = L * (vf - vb), a = L * (af - ab);
+  return {
+    s, v, state: {
+      pos: [P_DRIVE[0] + s, P_DRIVE[1]], heading: 0, wheel: s / VAN.wheelR,
+      pitch: -0.03 * a, brake: Math.abs(v) > 1e-4 ? clamp((-a * Math.sign(v)) / 0.5) : 0, lights: 1,
+    },
+  };
+}
+
+// ---- drawing ---------------------------------------------------------------------------------------------------
+function poly(pts, fill) { g.beginPath(); pts.forEach((p, i) => { const [x, y] = iso.p(p); i ? g.lineTo(x, y) : g.moveTo(x, y); }); g.closePath(); g.fillStyle = fill; g.fill(); }
+function ring(c, r, color, lw = 0.03) {
+  g.beginPath();
+  for (let i = 0; i <= 64; i++) { const an = (i / 64) * Math.PI * 2, [x, y] = iso.p([c[0] + r * Math.cos(an), c[1] + r * Math.sin(an), 0]); i ? g.lineTo(x, y) : g.moveTo(x, y); }
+  g.strokeStyle = color; g.lineWidth = lw * TW; g.stroke();
+}
+function person(c) {                                       // 0.72 tall scale figure
+  const [x, y] = c;
+  capsule(g, iso, [[x - 0.05, y + 0.02, 0.36], [x - 0.05, y + 0.02, 0.03]], 0.035, '#1C2C55');
+  capsule(g, iso, [[x + 0.05, y - 0.02, 0.36], [x + 0.05, y - 0.02, 0.03]], 0.035, '#22356A');
+  taper(g, iso, [x, y, 0.38], 0.07, [x, y, 0.56], 0.09, PAL.teal);
+  sphere(g, iso, [x, y, 0.655], 0.06, '#F1C9A5');
+}
+function txt(s, x, y, size, { weight = 600, font = MONO, color = PAL.sky, align = 'center' } = {}) {
+  g.font = `${weight} ${size * u}px ${font}`; g.fillStyle = color; g.textAlign = align; g.textBaseline = 'alphabetic'; g.fillText(s, x, y);
+}
+
+function draw(t) {
+  g.setTransform(1, 0, 0, 1, 0, 0); g.globalAlpha = 1; g.globalCompositeOperation = 'source-over';
+  g.fillStyle = PAL.night; g.fillRect(0, 0, W, H);
+  g.save(); g.setTransform(ZOOM, 0, 0, ZOOM, cx, cy);
+  poly([[-20, -20, 0], [20, -20, 0], [20, 20, 0], [-20, 20, 0]], PAL.ground);
+  g.strokeStyle = rgba(PAL.sky, 0.06); g.lineWidth = 0.03 * TW;
+  for (let i = -20; i <= 20; i++) {
+    g.beginPath(); g.moveTo(...iso.p([i, -20, 0])); g.lineTo(...iso.p([i, 20, 0])); g.stroke();
+    g.beginPath(); g.moveTo(...iso.p([-20, i, 0])); g.lineTo(...iso.p([20, i, 0])); g.stroke();
+  }
+  // road: 2 wide, the van in the near lane (lane centre = P_DRIVE.gy), dashed centre line
+  const [rx, ry] = P_DRIVE, r0 = rx - 1.6, r1 = rx + L + 1.6;
+  poly([[r0, ry - 0.5, 0], [r1, ry - 0.5, 0], [r1, ry + 1.5, 0], [r0, ry + 1.5, 0]], PAL.road);
+  g.strokeStyle = rgba(PAL.sky, 0.22); g.lineWidth = 0.04 * TW; g.setLineDash([0.25 * TW, 0.3 * TW]);
+  g.beginPath(); g.moveTo(...iso.p([r0, ry + 0.5, 0])); g.lineTo(...iso.p([r1, ry + 0.5, 0])); g.stroke(); g.setLineDash([]);
+  // distance ticks every 0.25 along the lane edge, so wheel spin can be read against travel
+  g.fillStyle = rgba(PAL.sky, 0.35);
+  for (let d = 0; d <= L + 1e-6; d += 0.25) { const [x, y] = iso.p([rx + d, ry - 0.45, 0]); g.beginPath(); g.arc(x, y, 0.025 * TW, 0, Math.PI * 2); g.fill(); }
+  ring(P_VAN, 1.0, rgba(PAL.sky, 0.14)); ring(P_CAR, 0.75, rgba(PAL.sky, 0.14));
+
+  // ground pass first (shadows + light pools), then the solids
+  const sv = vanTurntable(t), sc = carTurntable(t), dv = driveVan(t);
+  const ACTORS = [[sv, VAN, VAN_LOOK], [sc, CAR, CAR_LOOK], [dv.state, VAN, DRIVE_LOOK]];
+  for (const [s, spec] of ACTORS) vehicleGround(g, iso, s, spec);
+  ring(doorSill(sv, VAN), 0.12, rgba(PAL.orange, 0.9), 0.025);   // doorSill marker on the ground
+  person(P_MAN);
+  for (const [s, spec, look] of ACTORS) vehicle(g, iso, { ...s, ground: false }, spec, look);
+  g.restore();
+
+  const vg = g.createRadialGradient(cx, cy, H * 0.45, cx, cy, W * 0.75);
+  vg.addColorStop(0, 'rgba(3,9,24,0)'); vg.addColorStop(1, 'rgba(3,9,24,0.6)'); g.fillStyle = vg; g.fillRect(0, 0, W, H);
+
+  txt('RIG SHEET · lib/rigs/vehicle.ts', 6 * u, 7 * u, 2.2, { weight: 800, font: DISPLAY, color: PAL.ink, align: 'left' });
+  txt(`t ${t.toFixed(2)} s`, W - 6 * u, 7 * u, 1.6, { align: 'right', color: PAL.mute });
+  if (ZOOM !== 4) return;                                   // station labels are laid out for the default zoom
+  const deg = (a) => String(Math.round((((a * 180) / Math.PI) % 360 + 360) % 360)).padStart(3, '0');
+  const [vx] = SCREEN([P_VAN[0], P_VAN[1], 0]), [kx] = SCREEN([P_CAR[0], P_CAR[1], 0]);
+  txt(`VAN · heading ${deg(sv.heading)}° · door ${sv.door.toFixed(2)}`, vx, 86 * u, 1.6);
+  txt('lamps · brake pulses · pitch · steer', vx, 89 * u, 1.4, { color: PAL.mute });
+  txt(`CAR · heading ${deg(sc.heading)}°`, kx, 86 * u, 1.6);
+  txt('lower body + cabin · steer', kx, 89 * u, 1.4, { color: PAL.mute });
+  const [dx] = SCREEN([P_DRIVE[0] + L / 2, P_DRIVE[1], 0]);
+  txt(`VAN · s ${dv.s.toFixed(2)} · wheel = s / R`, dx, 86 * u, 1.6);
+  txt('min-jerk drive · brake = nose dip', dx, 89 * u, 1.4, { color: PAL.mute });
+}
+
+mountFilm({
+  dur: DUR,
+  async init() {
+    await Promise.all(['800 10px "Rubik"', '600 10px "JetBrains Mono"'].map((f) => document.fonts.load(f)));
+    // placeholder wordmark: asymmetric on purpose, so a mirrored decal would show
+    const paths = [new Path2D('M0 0 H60 V20 H20 V40 H50 V60 H20 V100 H0 Z M80 40 H400 V60 H80 Z')];
+    for (const look of [VAN_LOOK, DRIVE_LOOK]) { look.logo = paths; look.logoBox = [0, 0, 400, 100]; }
+  },
+  draw,
+});
+</script>

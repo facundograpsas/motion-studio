@@ -1,0 +1,4 @@
+{
+ "duration": 8,
+ "sheet": { "from": 0, "to": 8, "doorOpen": 0.5, "doorClose": 3.0, "brake": [2.4, 3.6], "carBrake": [5.6, 6.8], "drive": [0.4, 3.4], "back": [4.2, 7.4] }
+}

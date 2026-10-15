@@ -15,7 +15,7 @@
     "film": "node tools/film.ts",
     "review": "node tools/review.ts",
     "music": "node tools/music.ts",
-    "sfx": "node tools/sfx.ts",
+    "sfx": "PYTHONPATH=tools .venv/bin/python -m sfx",
     "beats": ".venv/bin/python -I tools/beats.py",
     "typecheck": "tsc --noEmit"
   },

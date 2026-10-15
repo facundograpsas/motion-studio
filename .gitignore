@@ -9,3 +9,10 @@ films/*/out/
 .DS_Store
 films/*/audio/music.wav
 films/*/audio/sfx.wav
+__pycache__/
+# productions stay on this computer: the repo only tracks the harness films
+films/*
+!films/_template/
+!films/demo/
+!films/rig-sheet/
+!films/people-sheet/

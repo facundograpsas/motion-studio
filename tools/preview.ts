@@ -2,6 +2,7 @@
 // The page plays in a loop with a scrubber; space = pause, ←/→ = ±1 frame, [ ] = ±1s.
 import { createServer } from 'node:http';
 import { readFile, readdir } from 'node:fs/promises';
+import { stripTypeScriptTypes } from 'node:module';
 import { extname, join, resolve } from 'node:path';
 
 const ROOT = resolve(import.meta.dirname, '..'), PORT = Number(process.env.PORT ?? 5173);
@@ -27,5 +28,7 @@ createServer(async (req, res) => {
   if (path.endsWith('/')) path += 'index.html';
   const body = await readFile(path).catch(() => null);
   if (!body) return res.writeHead(404).end();
+  // lib/rigs/*.ts: the browser gets the same file with its types erased
+  if (extname(path) === '.ts') return res.writeHead(200, { 'content-type': 'text/javascript', 'cache-control': 'no-store' }).end(stripTypeScriptTypes(body.toString()));
   res.writeHead(200, { 'content-type': MIME[extname(path)] ?? 'application/octet-stream', 'cache-control': 'no-store' }).end(body);
 }).listen(PORT, () => console.log(`preview → http://localhost:${PORT}/`));

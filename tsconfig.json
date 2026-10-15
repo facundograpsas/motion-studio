@@ -2,7 +2,7 @@
   "compilerOptions": {
     "target": "ES2024", "module": "NodeNext", "moduleResolution": "NodeNext",
     "strict": true, "noEmit": true, "allowImportingTsExtensions": true,
-    "erasableSyntaxOnly": true, "skipLibCheck": true, "types": ["node"]
+    "erasableSyntaxOnly": true, "skipLibCheck": true, "allowJs": true, "types": ["node"]
   },
-  "include": ["tools/**/*.ts"]
+  "include": ["tools/**/*.ts", "lib/**/*.ts"]
 }

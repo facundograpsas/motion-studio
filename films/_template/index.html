@@ -6,10 +6,12 @@
 <style>html,body{margin:0;background:#141413;overflow:hidden}canvas{display:block;max-width:100vw;max-height:100vh;margin:auto}</style>
 <canvas id="c"></canvas>
 <script type="module">
-import { spring, springP, track, swapAlpha, rng, format, loadJSON, mountFilm, cutCurve, zoomThrough } from '/lib/motion.js';
+import { spring, springP, track, swapAlpha, rng, format, loadJSON, mountFilm, cutCurve, zoomThrough, local } from '/lib/motion.js';
+// Every scene boundary and beat lives in timeline.json; audio/cues.py reads the same file
+import TL from './timeline.json' with { type: 'json' };
 
 // ---- Film settings --------------------------------------------------------
-const DUR = 8;
+const DUR = TL.duration;
 const PAL = { bg: '#141413', ink: '#F0EEE6', accent: '#D97757', mute: '#3D3D3A' };
 const DISPLAY = '"Source Serif 4", serif', UI = '"Inter Tight", sans-serif';
 
@@ -21,23 +23,23 @@ const main = cv.getContext('2d');
 const layer = new OffscreenCanvas(W, H), g = layer.getContext('2d');
 
 // ---- Seams: the film's current + reserved vectors spent on meaning ---------
-// Default boundary = cut the curve in CURRENT. Override per cut time: { kind: 'zoom', mode: 'push'|'pull' }.
+// Default boundary = cut the curve in CURRENT. Override per incoming scene: { kind: 'zoom', mode: 'push'|'pull' }.
 const CURRENT = 'left';
-const SEAMS = { 5: { kind: 'zoom', mode: 'push' } };
+const SEAMS = { pill: { kind: 'zoom', mode: 'push' } };
 let beats = { bpm: 120, beats: [] };
 
-// ---- Scenes: one object per shot, times local to the scene -----------------
+// ---- Scenes: one per timeline.json scene; t and k (its beats) are local to the scene
 const SCENES = [
-  { from: 0, to: 2.5, draw(t) {                        // hook: kinetic title
-      const s = springP(t - 0.1, 'heavy');
+  { id: 'hook', draw(t, k) {                           // kinetic title
+      const s = springP(t - k.title, 'heavy');
       g.save(); g.translate(cx, cy); g.scale(s, s);       // grows from nothing: frame 0 = last frame (loop)
       g.fillStyle = PAL.ink; g.font = `700 ${18 * u}px ${DISPLAY}`;
       g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText('MOTION', 0, 0);
-      const bar = springP(t - 0.35, 'snappy');
+      const bar = springP(t - k.bar, 'snappy');
       g.fillStyle = PAL.accent; g.fillRect(-30 * u * bar, 11 * u, 60 * u * bar, 1.6 * u);
       g.restore();
   }},
-  { from: 2.5, to: 5, draw(t) {                        // grid on a stagger
+  { id: 'grid', draw(t) {                              // grid on a stagger
       const r = rng(7), cols = vertical ? 6 : 10, rows = vertical ? 8 : 5, cell = Math.min(W / (cols + 1), H / (rows + 1));
       for (let i = 0; i < cols * rows; i++) {
         const x = cx + ((i % cols) - (cols - 1) / 2) * cell, y = cy + (Math.floor(i / cols) - (rows - 1) / 2) * cell;
@@ -46,34 +48,35 @@ const SCENES = [
         const h = cell * 0.36 * s; g.fillRect(x - h, y - h, 2 * h, 2 * h);
       }
   }},
-  { from: 5, to: 8, draw(t) {                          // one shape, never cut: pill morphs through states
-      const keys = (a, b, c) => [[0, a], [0.6, b], [1.6, c]];
+  { id: 'pill', draw(t, k) {                           // one shape, never cut: pill morphs through states
+      const keys = (a, b, c) => [[0, a], [k.label, b], [k.check, c]];
       const w = track(t, keys(14 * u, 60 * u, 14 * u), 'base');   // arrives composed: a full dot, not a speck
       const h = 14 * u;
       const rad = 7 * u;
-      const out = spring(t - 2.5, 220, 28);               // collapse at the end so frame 8s = frame 0s
+      const out = spring(t - k.collapse, 220, 28);        // collapse at the end so the last frame = frame 0
       g.save(); g.translate(cx, cy); g.scale(1 - out, 1 - out);
       g.fillStyle = PAL.accent; g.beginPath(); g.roundRect(-w / 2, -h / 2, w, h, rad); g.fill(); g.clip(); // content never leaves the shape
       g.fillStyle = PAL.bg; g.font = `800 ${5 * u}px ${UI}`; g.textAlign = 'center'; g.textBaseline = 'middle';
-      g.globalAlpha = swapAlpha(t, 0.6, 1.6); g.fillText('Get started', 0, 0);
-      g.globalAlpha = swapAlpha(t, 1.6, 2.5); g.fillText('✓', 0, 0);
+      g.globalAlpha = swapAlpha(t, k.label, k.check); g.fillText('Get started', 0, 0);
+      g.globalAlpha = swapAlpha(t, k.check, k.collapse); g.fillText('✓', 0, 0);
       g.restore();
   }},
-];
+].map((s) => ({ ...s, from: TL[s.id].from, to: TL[s.id].to, k: local(TL[s.id]) }));
 
-function seamFx(tCut, side, t) {
-  const seam = SEAMS[tCut] ?? { kind: 'cut', dir: CURRENT };
+// seam at the start of scene `id`
+function seamFx(id, side, t) {
+  const seam = SEAMS[id] ?? { kind: 'cut', dir: CURRENT }, tCut = TL[id].from;
   return seam.kind === 'zoom' ? zoomThrough(t, tCut, seam.mode, 18)[side] : cutCurve(t, tCut, F, seam.dir ?? CURRENT)[side];
 }
 
 function draw(t) {
   main.globalAlpha = 1; main.filter = 'none'; main.fillStyle = PAL.bg; main.fillRect(0, 0, W, H);
-  const s = SCENES.find((sc) => t >= sc.from && t < sc.to);
+  const i = SCENES.findIndex((sc) => t >= sc.from && t < sc.to), s = SCENES[i], next = SCENES[i + 1];
   if (!s) return;
   g.clearRect(0, 0, W, H); g.globalAlpha = 1;
-  s.draw(t - s.from);
+  s.draw(t - s.from, s.k);
   // incoming side of the seam at s.from, outgoing side at s.to (first/last scene: no seam)
-  const fx = [s.from > 0 && seamFx(s.from, 'in', t), s.to < DUR && seamFx(s.to, 'out', t)].filter(Boolean);
+  const fx = [i > 0 && seamFx(s.id, 'in', t), next && seamFx(next.id, 'out', t)].filter(Boolean);
   const x = fx.reduce((a, f) => a + (f.x ?? 0), 0), y = fx.reduce((a, f) => a + (f.y ?? 0), 0);
   const sc = fx.reduce((a, f) => a * (f.scale ?? 1), 1), blur = Math.max(0, ...fx.map((f) => f.blur ?? 0));
   main.save();

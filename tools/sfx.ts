@@ -1,3 +1,4 @@
+// LEGACY: films with audio/cues.json. New films use audio/cues.py on timeline.json (tools/sfx/, npm run sfx).
 // Synthesize UI sound effects from a cue list (step 09).
 // node tools/sfx.ts <cues.json> <out.wav>      cues: [{"t":0.5,"type":"click","gain":1}, ...]
 // Types: click, pop, thump, whoosh, tick, rise, type (keyboard)

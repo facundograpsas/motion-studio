@@ -86,8 +86,10 @@ Formats: `9x16` (1080x1920, default), `1x1`, `16x9`, `4x5`. Output: `films/<name
 ## Characters and vehicles (`lib/rigs/`)
 - Actors are tiny 3D models in iso world units, drawn flat: `iso.ts` (projection, shaded convex solids,
   `onPlane()` decals, IK), `path.ts` (routes with rounded corners, `cruise()`/`keyed()` motion, `follow()`
-  spring filter, `footsteps()`), `person.ts` (IK skeleton, face, hair, hand targets), `vehicle.ts` (van, car).
-  Written in TS; the preview and render servers strip the types. Model sheet: `films/rig-sheet/` (vehicles).
+  spring filter, `footsteps()`), `person.ts` (IK skeleton, face, hair, hand targets; poses: walk, `run` with
+  `footsteps(…, duty 0.35)`, `sit`, phone via `HANDS.phone` + `headPitch` + `phone()`), `vehicle.ts` (van, car).
+  Written in TS; the preview and render servers strip the types.
+  Model sheets to check a rig change at every angle: `films/people-sheet/`, `films/rig-sheet/` (vehicles).
 - Locomotion is driven by distance, never by time: wheel spin = distance / radius; feet come from
   `footsteps()`, where a planted foot is a fixed world point (zero slide, verify numerically if you change it).
   Set a walk's step count in timeline.json so `cues.py` can put footsteps on the plants.
@@ -95,7 +97,8 @@ Formats: `9x16` (1080x1920, default), `1x1`, `16x9`, `4x5`. Output: `films/<name
   never on UI. Act with anticipation (squat before a hop), follow-through (body pitch from `follow()`),
   and give the other actor room (step back, turn toward them).
 - Sort actors and buildings with footprints (iso AABB rule), not a single depth number; clip an actor to
-  an opening while it is inside something (a door, a dock). Check occlusion before blocking a scene:
+  an opening while it is inside something (a door, a dock), minus the door leaf as it swings, so they are
+  uncovered by the door instead of popping in. Check occlusion before blocking a scene:
   anything taller between an actor and the camera (a parked van) hides its feet.
 
 ## Look

@@ -98,42 +98,43 @@ export function follow(t: number, f: (t: number) => number, k = 60, d = 12, win 
 }
 
 // ---- Footsteps -------------------------------------------------------------------------------------
-// The walk is planned in distance: n = round(D / step) equal steps (so the last plant lands exactly on D),
-// step k lands at s = k·h and swings while the body covers [(k − 1.5)h, (k − 0.5)h]. The first step starts
-// at s = 0 from feet together and a closing step brings the trailing foot alongside at the end.
-// Exactly one foot is in the air at a time; the planted one never moves.
+// The walk is planned in distance: n = round(D / step) equal steps (so the last plant lands exactly on D).
+// Step k (right foot on odd k, left on even) carries its foot from plant k − 2 to plant k = k·h: it lifts
+// when the body passes (k − 2 + duty)·h and lands at (k − duty)·h. duty 0.5 = a walk (one foot always
+// down); below ~0.4 both feet leave the ground between steps = a run. The first step starts at s = 0 from
+// feet together and a closing step brings the trailing foot alongside at D. A planted foot never moves.
 export interface Foot { p: V3; heading: number }
-export interface Gait { feet: [Foot, Foot]; swing: number; bob: number }  // feet [left (+side), right]; swing −1…1 for the arms; bob 0…1 (1 = mid-stance)
+export interface Gait { feet: [Foot, Foot]; swing: number; bob: number }  // feet [left (+side), right]; swing −1…1 for the arms; bob 0…1 (1 = top of the bounce)
 
-export function footsteps(rt: Route, D = rt.L, step = 0.32, width = 0.1, lift = 0.07) {
-  const n = Number.isFinite(D) ? Math.max(1, Math.round(D / step)) : Infinity, h = Number.isFinite(D) ? D / n : step;
+export function footsteps(rt: Route, D = rt.L, step = 0.32, width = 0.1, lift = 0.07, duty = 0.5) {
+  const finite = Number.isFinite(D), n = finite ? Math.max(1, Math.round(D / step)) : Infinity, h = finite ? D / n : step;
   const plant = (k: number) => Math.min(Math.max(0, k * h), D);
   const footAt = (s: number, side: number, up = 0): Foot => {
     const r = rt.at(s), w = (side * width) / 2;
     return { p: [r.p[0] - Math.sin(r.heading) * w, r.p[1] + Math.cos(r.heading) * w, up], heading: r.heading };
   };
-  // foot of step k: odd steps are the right foot (side −1), even the left (+1)
-  const sideOf = (k: number) => (k % 2 ? -1 : 1);
   const swingFoot = (from: number, to: number, side: number, q: number): [Foot, number] => {
     const e = (1 - Math.cos(Math.PI * clamp(q))) / 2;
-    const f = footAt(from + (to - from) * e, side, Math.sin(Math.PI * clamp(q)) * lift * clamp((to - from) / h * 2));
-    return [f, from + (to - from) * e];
+    return [footAt(from + (to - from) * e, side, Math.sin(Math.PI * clamp(q)) * lift * clamp((to - from) / h * 2)), from + (to - from) * e];
   };
+  // last regular step of each foot; the foot whose last step is n − 1 takes the closing step
+  const lastOf = (side: number) => (((n % 2 === 1) === (side < 0)) ? n : n - 1);
+  const foot = (s: number, side: number): [Foot, number] => {
+    if (finite && s >= D) return [footAt(D, side), D];
+    if (finite && lastOf(side) === n - 1 && s >= (n - 1 + duty) * h) return swingFoot(plant(n - 1), D, side, (s - (n - 1 + duty) * h) / (D - (n - 1 + duty) * h));
+    let k = Math.floor(s / h + 2 - duty);
+    if ((k % 2 === 1) !== (side < 0)) k--;                     // this foot's parity
+    if (finite) k = Math.min(k, lastOf(side));
+    if (k < (side < 0 ? 1 : 2)) return [footAt(0, side), 0];  // has not moved yet
+    const s0 = Math.max(0, (k - 2 + duty) * h), s1 = (k - duty) * h;
+    if (s >= s1) return [footAt(plant(k), side), plant(k)];
+    return swingFoot(plant(k - 2), plant(k), side, (s - s0) / (s1 - s0));
+  };
+  const runs = duty < 0.45;
   return (s: number): Gait => {
     s = Math.max(0, s);
-    let k: number, from: number, to: number, s0: number, s1: number;
-    if (s >= D) {                                                    // arrived: feet together
-      return { feet: [footAt(D, 1), footAt(D, -1)], swing: 0, bob: 0 };
-    } else if (n !== Infinity && s >= D - 0.5 * h) {               // closing step
-      k = n + 1; from = plant(n - 1); to = D; s0 = D - 0.5 * h; s1 = D;
-    } else {
-      k = Math.max(1, Math.min(n, Math.floor(s / h + 1.5)));
-      from = plant(k - 2); to = plant(k); s0 = Math.max(0, (k - 1.5) * h); s1 = (k - 0.5) * h;
-    }
-    const side = sideOf(k), [moving, dm] = swingFoot(from, to, side, (s - s0) / (s1 - s0));
-    const otherAt = k === n + 1 ? D : plant(k - 1), still = footAt(otherAt, -side);
-    const feet: [Foot, Foot] = side > 0 ? [moving, still] : [still, moving];
-    const dl = side > 0 ? dm : otherAt, dr = side > 0 ? otherAt : dm;
-    return { feet, swing: clamp((dl - dr) / h, -1, 1), bob: 0.5 + 0.5 * Math.cos((2 * Math.PI * s) / h) };
+    const [l, dl] = foot(s, 1), [r, dr] = foot(s, -1), c = Math.cos((2 * Math.PI * s) / h);
+    const settle = finite && s >= D ? 0 : 1;
+    return { feet: [l, r], swing: clamp((dl - dr) / h, -1, 1), bob: settle * (runs ? 0.5 - 0.5 * c : 0.5 + 0.5 * c) };
   };
 }

@@ -1,0 +1,70 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>people-sheet</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@500;600&display=block" rel="stylesheet">
+<style>html,body{margin:0;background:#06122B;overflow:hidden}canvas{display:block;max-width:100vw;max-height:100vh;margin:auto}</style>
+<canvas id="c"></canvas>
+<script type="module">
+import { format, mountFilm } from '/lib/motion.js';
+import { isoView, frame, box3, rgba } from '/lib/rigs/iso.ts';
+import { route, footsteps } from '/lib/rigs/path.ts';
+import { person, phone, HANDS } from '/lib/rigs/person.ts';
+import TL from './timeline.json' with { type: 'json' };
+
+// Model sheet for lib/rigs/person.ts: every pose at every heading. Standing (expressions), walking and
+// running on square loops (planted feet stay put, the run has a flight phase), sitting on a bench with a
+// phone (turntable), walking while texting. Scrub it or render it after touching the rig.
+const DUR = TL.duration;
+const F = format(1920, 1080), { W, H, u, cx, cy } = F;
+const cv = document.getElementById('c');
+cv.width = W; cv.height = H;
+const g = cv.getContext('2d');
+const TW = 8 * u, iso = isoView(TW), ZOOM = 3.4;
+const MONO = '"JetBrains Mono", monospace';
+
+const LOOKS = [
+  { skin: '#C98E66', hair: '#1B1B24', top: '#43BECB', bottom: '#4A6AB0', shoes: '#F2F6FF', cap: '#14428E', seed: 3 },
+  { skin: '#F2C7A5', hair: '#3A2418', top: '#FEA21F', bottom: '#5A78BC', shoes: '#E9EEF8', hairStyle: 'long', seed: 8 },
+  { skin: '#8D5B3E', hair: '#1B1B24', top: '#8EB6F8', bottom: '#2F4C86', shoes: '#E9EEF8', hairStyle: 'short', seed: 2 },
+  { skin: '#B97E5A', hair: '#1B1B24', top: '#8EB6F8', bottom: '#3D5A99', shoes: '#E9EEF8', hairStyle: 'bun', seed: 5 },
+  { skin: '#F5D3B8', hair: '#C9A06B', top: '#7088BB', bottom: '#2B3F73', shoes: '#1B2238', hairStyle: 'long', seed: 1 },
+];
+// stations in one screen row (gx + gy = 0), 3 units of gx − gy apart
+const AT = [[-3, 3], [-1.5, 1.5], [0, 0], [1.5, -1.5], [3, -3]];
+const LABEL = ['parado · caras', 'camina', 'corre', 'sentado + celular', 'camina + celular'];
+const loop = (c, r) => { const p = [[c[0] - r, c[1] - r], [c[0] + r, c[1] - r], [c[0] + r, c[1] + r], [c[0] - r, c[1] + r]]; return route([...p, ...p, ...p, p[0]], 0.3); };
+const WALK = loop(AT[1], 0.45), RUN = loop(AT[2], 0.55), TEXT = loop(AT[4], 0.45);
+const G_WALK = footsteps(WALK, Infinity, 0.3), G_RUN = footsteps(RUN, Infinity, 0.46, 0.1, 0.11, 0.35), G_TEXT = footsteps(TEXT, Infinity, 0.26);
+const FACES = [['open', 'flat'], ['happy', 'smile'], ['wide', 'o'], ['closed', 'open']];
+
+function walker(t, rt, G, v, extra = {}) {
+  const s = v * t, at = rt.at(s), gait = G(s);
+  return { t, pos: [at.p[0], at.p[1], 0], heading: at.heading, feet: gait.feet, walk: 1, bob: gait.bob, swing: gait.swing, ...extra };
+}
+// seat and legs go under the sitter; the backrest goes behind or in front of them depending on the heading
+const seat = (f) => { for (const y of [-0.21, 0.21]) box3(g, iso, f, [-0.05, y, 0], [0.12, 0.03, 0.16], '#25386A'); box3(g, iso, f, [-0.05, 0, 0.16], [0.16, 0.5, 0.035], '#3B4A6E'); };
+const backrest = (f) => box3(g, iso, f, [-0.135, 0, 0.19], [0.03, 0.5, 0.2], '#3B4A6E');
+
+function draw(t) {
+  g.setTransform(1, 0, 0, 1, 0, 0); g.fillStyle = '#0A1A3D'; g.fillRect(0, 0, W, H);
+  g.setTransform(ZOOM, 0, 0, ZOOM, cx, cy);
+  g.strokeStyle = rgba('#8EB6F8', 0.06); g.lineWidth = 0.03 * TW;
+  for (let i = -12; i <= 12; i++) { g.beginPath(); g.moveTo(...iso.p([i, -12, 0])); g.lineTo(...iso.p([i, 12, 0])); g.stroke(); g.beginPath(); g.moveTo(...iso.p([-12, i, 0])); g.lineTo(...iso.p([12, i, 0])); g.stroke(); }
+  const spin = (2 * Math.PI * t) / DUR, [eyes, mouth] = FACES[Math.floor(t / 2) % 4];
+  person(g, iso, { t, pos: [...AT[0], 0], heading: spin, eyes, mouth }, LOOKS[0]);
+  person(g, iso, walker(t, WALK, G_WALK, 0.7), LOOKS[1]);
+  person(g, iso, walker(t, RUN, G_RUN, 1.6, { run: 1 }), LOOKS[2]);
+  const sitter = { t, pos: [...AT[3], 0], heading: -spin, sit: 1, hands: HANDS.phone, headPitch: 0.55 };
+  const bf = frame(sitter.pos, sitter.heading), facesUs = Math.cos(sitter.heading) + Math.sin(sitter.heading) > 0;
+  seat(bf); if (facesUs) backrest(bf);
+  person(g, iso, sitter, LOOKS[3], [phone(g, iso, sitter)]);
+  if (!facesUs) backrest(bf);
+  const texter = walker(t, TEXT, G_TEXT, 0.45, { hands: HANDS.phone, headPitch: 0.5 });
+  person(g, iso, texter, LOOKS[4], [phone(g, iso, texter)]);
+  g.setTransform(1, 0, 0, 1, 0, 0); g.font = `600 ${1.5 * u}px ${MONO}`; g.textAlign = 'center'; g.fillStyle = '#8EB6F8';
+  AT.forEach((a, i) => { const [x, y] = iso.p([a[0] + 0.8, a[1] + 0.8, 0]); g.fillText(LABEL[i], cx + x * ZOOM, cy + y * ZOOM + 3 * u); });
+}
+
+mountFilm({ dur: DUR, async init() { await document.fonts.load(`600 10px ${MONO}`); }, draw });
+</script>

@@ -7,7 +7,8 @@
 // Word timings come from the API's character alignment and are cut back into lines; timeline.src.json references
 // are resolved into timeline.json.
 // node tools/vo.ts films/<name> [--fit]
-//   --fit   no API calls: estimate from the words (vo.json "wpm", default 160, + pauses) to check the script fits
+//   --fit   no API calls: estimate from the words (vo.json "wpm", default 160, + pauses) to check the script fits;
+//           writes audio/vo_words.fit.json only (never timeline.json or the real vo_words.json)
 // Input  audio/vo.json   { voice, model?, settings?, start?, breath?, wpm?, lines: [{ id, text, gap?, at?, take?, pad? }] }
 //        "pad": seconds of extra silence after a line — the take is split in the natural pause and the rest pushed
 //        later, so a scene gets room without regenerating an approved read
@@ -176,7 +177,8 @@ for (const [p, para] of paras.entries()) {
 const end = lines.at(-1)?.to ?? 0;
 for (const l of lines) console.log(`${l.id.padEnd(6)} ${l.from.toFixed(2).padStart(6)}–${l.to.toFixed(2).padStart(6)}s  ${l.text.slice(0, 70)}`);
 console.log(`${opt.fit ? '≈ estimate' : '✔ voice'}: ${lines.length} lines, ends at ${end.toFixed(2)}s${opt.fit ? '' : ` (${calls} new ElevenLabs calls)`}`);
-writeFileSync(join(audio, 'vo_words.json'), JSON.stringify({ estimate: opt.fit, end, lines }, null, 1));
+// --fit never touches the real timings or the film's timeline: an estimate goes to its own file
+writeFileSync(join(audio, opt.fit ? 'vo_words.fit.json' : 'vo_words.json'), JSON.stringify({ estimate: opt.fit, end, lines }, null, 1));
 
 // ---- audio/vo.wav: every line at its place -----------------------------------------------
 if (!opt.fit && clips.length) {
@@ -191,7 +193,7 @@ if (!opt.fit && clips.length) {
 
 // ---- timeline.src.json → timeline.json --------------------------------------------------
 const src = join(film, 'timeline.src.json');
-if (existsSync(src)) {
+if (existsSync(src) && !opt.fit) {
   const byId = Object.fromEntries(lines.map((l) => [l.id, l]));
   const ref = (s: string): number => {
     const m = /^@([\w-]+)(?:\.(end))?(?::([^#+\-]+)(?:#(\d+))?)?([+-][\d.]+)?$/.exec(s);

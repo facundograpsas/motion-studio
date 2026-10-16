@@ -21,11 +21,11 @@ Ask only for what is missing; sensible defaults: 15s, 9:16 first, synthesized mu
 5. Write docs/shotlist.md on the beat grid, and the same beats into timeline.json (scenes + named moments): per shot time range, event, reads, sustained-motion route,
    SFX, and the seam out of it (cut the curve in CURRENT by default; reserved vectors only with a reason).
    Show it and wait for OK.
-6. Build index.html with lib/motion.js springs, laid out in `u` units for every format; scenes read
+6. Build index.html with lib/motion.js springs and lib/blocks.js (lib/gl.js for 3D devices and post fx), laid out in `u` units for every format; scenes read
    their times from timeline.json (`k`), never typed numbers. Write audio/cues.py against the same
    timeline (`npm run sfx -- --list` for generators) and run `npm run sfx -- films/<name>`.
-7. `npm run draft` → `npm run review` → open contact.png/phone.png → critique (prompts/06-critique-pass.md)
-   → fix → repeat. 3 rounds minimum, until every score is 8+. Log in docs/review_log.md.
+7. `npm run qa -- films/<name> --format all` (no errors) → `npm run draft` → `npm run review` → open
+   contact.png/phone.png → independent critic subagent (prompts/07-independent-critic.md) → fix → repeat. 3 rounds minimum, until every score is 8+. Log in docs/review_log.md.
 8. `npm run film -- films/<name> --format all` → out/<format>/final.mp4 at -14 LUFS.
 9. Deliver final.mp4, contact.png, poster.png per format. Say what you'd improve next.
 

@@ -1,0 +1,6 @@
+{
+ "duration": 12,
+ "blocks": { "from": 0, "to": 4.2, "title": 0.05, "count": 0.3, "bars": 0.7, "cursor": [1.4, 2.2], "click": 2.5 },
+ "phone": { "from": 4.2, "to": 8.4, "spin": 4.2, "count": 4.9, "tap": 6.2, "bars": 6.3, "turn": 7.6 },
+ "laptop": { "from": 8.4, "to": 12, "open": 8.4, "ui": 9.2, "push": 10.4 }
+}

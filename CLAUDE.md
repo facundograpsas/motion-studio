@@ -16,9 +16,16 @@ renders it and ffmpeg encodes it. Opus writes the program, renders it, looks at 
   This repo never holds a production's content, brand or data.
 - `lib/motion.js` — springs, `track()`, `indicator()`, `swapAlpha()`, `rng()`, `format()`, beat helpers,
   seams (`cutCurve()`, `zoomThrough()`), `nudge()`, `waterfall()`, `local()` (scene beats → scene-local times).
+- `lib/blocks.js` — `blocks(g, F, { PAL, UI, DISPLAY })`: the helpers films used to copy (`txt`, `measure`, `wrap`,
+  `para`, `fit`, `rr`, `circle`, `ring`, `stamp`) plus `pill()`, `counter()` (lands exactly on its target),
+  `bars()`, `cursor()` (click ripple), `device()` (flat phone/laptop). Use them instead of copying helpers.
+- `lib/gl.js` — WebGL layer: `stage(F)` (Three.js, driven by t, world units = px), `phone()` / `laptop()` 3D
+  mockups whose screen is a 2D canvas painted with blocks each frame, `postFx()` (chroma, warp, grain,
+  vignette; seams ramp it to the cut and back, same amount both sides). Headless = SwiftShader, deterministic.
+  Model sheet: `films/blocks-sheet/`.
 - `tools/*.ts` (Node 26 runs TS natively), `tools/beats.py` and `tools/sfx/` (SFX engine, uses `.venv`;
   adapted from whaleyxbt/claude-motion, MIT).
-- `prompts/` — prompt patterns (one-liner, brand, reference, UI-morph spec, director brief, critique pass).
+- `prompts/` — prompt patterns (one-liner, brand, reference, UI-morph spec, director brief, critique pass, independent critic).
 - `references/` — cloned repos for study only (gitignored, never run their code from here).
 
 ## Commands
@@ -29,6 +36,8 @@ npm run draft -- films/<name> [--format 16x9]   half-res, 30fps, no blur — fas
 npm run render -- films/<name> [--from 4 --to 6] full quality 60fps, 4 subframes motion blur
 npm run film -- films/<name> [--format all]     music → sfx → render → mix -14 LUFS → review sheets
 npm run review -- <video.mp4> [--at 4.2]        contact.png, phone.png, poster.png, loop_check.mp4, strip.png
+npm run qa -- films/<name> [--format all]       measured QA: text cut/crowding the edge/overlapping/low contrast,
+                                                empty frames, holds, seam gate → out/qa/<format>/report.md
 npm run beats -- <song.wav> > films/<name>/audio/beats.json
 npm run sfx -- films/<name>                     audio/cues.py + timeline.json → audio/sfx.wav
 npm run sfx -- --list                           SFX generators and what each is for
@@ -133,13 +142,17 @@ meanings; lead the eye before an important read. Let the reads set the shot leng
 - Shot count tracks distinct treatments, not beats — extra density goes inside a shot.
 
 ## Loop before you show me anything
-1. `npm run draft` + `npm run review`, then OPEN contact.png and phone.png and LOOK at them.
+1. `npm run qa -- films/<name> --format all` until it has no errors (it exits 1 on errors). Read the
+   warnings and open the marked PNGs: fix what is real, say why the rest is intended.
+2. `npm run draft` + `npm run review`, then OPEN contact.png and phone.png and LOOK at them.
    Use `--at <t>` for a strip around any fast action.
-2. Score 1-10: hook in first 2s · readability at phone size · motion quality · variety ·
+3. Independent critic: a fresh subagent that only sees the render and the QA report
+   (`prompts/07-independent-critic.md`) scores it. The builder never grades its own film.
+4. Score 1-10: hook in first 2s · readability at phone size · motion quality · variety ·
    composition · brand accuracy · sound sync. Log in `docs/review_log.md`.
    Check every seam with a strip (`--at <cut time>`): no empty frames around the cut, same direction both sides.
-3. Fix the 3 worst problems. Re-render only the affected seconds (`--from/--to`). Repeat until every score is 8+.
-4. Only then the full render (`npm run film`).
+5. Fix the 3 worst problems. Re-render only the affected seconds (`--from/--to`). Repeat until every score is 8+.
+6. Only then the full render (`npm run film`).
 
 ## Effort
 medium for small fixes and re-renders · xhigh for new films · max for flagship pieces.

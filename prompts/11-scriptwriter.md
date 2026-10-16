@@ -9,6 +9,11 @@ You are writing a film's script, for the ear first. Rules:
   as a result; a stated number is said the way it was stated.
 - Each line is a read: write what the viewer must get from it, and the picture that proves it
   (if a line has no picture that proves it, cut the line).
-- ~150 words per minute plus pauses. Run `npm run vo -- films/[name] --fit` and give the estimated length.
+- Tell it through a protagonist (one order, one customer) who lives the problem and comes back near the end.
+  Vary the rhythm: long sentences carry cause and effect, short ones are the hits after them — a row of short
+  declaratives reads as slogans. The voice says what the picture can't; it never names what is on screen.
+- A number is set up (context before), lands alone (a [beat] of silence before it) and is translated after it.
+- 140–180 words for ~90 s: leave room for silence. Run `npm run vo -- films/[name] --fit` for the length.
+- Before handing back, run the story tests in prompts/16-story-critic.md on your own draft; a fresh critic will too.
 Give one script and two alternative openings (first two lines). Leave it DRAFT and stop.
 ```

@@ -59,7 +59,7 @@ APPROVED. The hand-off is the document on disk, never the chat. `docs/PROGRESS.m
 | # | stage | prompt | writes | gate |
 |---|---|---|---|---|
 | 0 | brief + facts | `10-producer-brief` | `docs/brief.md`, `docs/facts.md` | user, text |
-| 1 | script | `11-scriptwriter` | `docs/script.md` (+ `npm run vo --fit`) | user, text |
+| 1 | script → story critic | `11-scriptwriter`, `16-story-critic` | `docs/script.md` (+ `npm run vo --fit`) | critic, then user |
 | 2 | direction (3 → 1, jury) | `12-director` | `docs/style_guide.md` | user picks |
 | 3 | voice | `13-storyboard` | `audio/vo.json`, `timeline.src.json` | user listens |
 | 4 | storyboard from code | `13-storyboard` | one still per beat | user, pixels |

@@ -1,8 +1,11 @@
-// Voice-over as the film's clock. One ElevenLabs call per line (cached by content), word timings from the
-// API's character alignment, lines laid end to end, and timeline.src.json references resolved into timeline.json.
+// Voice-over as the film's clock. Lines are read in paragraphs, the way a narrator reads them: consecutive lines are
+// one ElevenLabs call (cached by content, with the neighbouring paragraphs as context so the intonation carries on);
+// a line whose "gap" is at least `breath` (default 0.6 s) starts a new paragraph after that planned silence.
+// Word timings come from the API's character alignment and are cut back into lines; timeline.src.json references
+// are resolved into timeline.json.
 // node tools/vo.ts films/<name> [--fit]
-//   --fit   no API calls: estimate each line from its words (~150 wpm + pauses) to check the script fits
-// Input  audio/vo.json   { voice, model?, settings?, start?, gap?, lines: [{ id, text, gap?, at? }] }
+//   --fit   no API calls: estimate from the words (vo.json "wpm", default 160, + pauses) to check the script fits
+// Input  audio/vo.json   { voice, model?, settings?, start?, breath?, wpm?, lines: [{ id, text, gap?, at? }] }
 //        timeline.src.json (optional) — like timeline.json, but any string "@ref" is resolved:
 //          "@l3" line start · "@l3.end" line end · "@l3:finds" start of that word (· "#2" second one)
 //          "@end" last line's end · any of them + an offset: "@l3:finds+0.2", "@l2.end-0.1"
@@ -20,7 +23,7 @@ const ROOT = resolve(import.meta.dirname, '..'), film = resolve(positionals[0]),
 const cfg = JSON.parse(readFileSync(join(audio, 'vo.json'), 'utf8'));
 const model = cfg.model ?? 'eleven_multilingual_v2';
 const settings = cfg.settings ?? { stability: 0.5, similarity_boost: 0.75, style: 0.2 };
-type Word = { w: string; key: string; from: number; to: number };
+type Word = { w: string; key: string; from: number; to: number; at: number }; // at = character index in the text
 type Line = { id: string; text: string; from: number; to: number; words: Word[] };
 
 const keyOf = (w: string) => w.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9']/g, '');
@@ -31,25 +34,27 @@ function wordsFrom(al: { characters: string[]; character_start_times_seconds: nu
   let cur: Word | null = null;
   al.characters.forEach((ch, i) => {
     if (/\s/.test(ch)) { cur = null; return; }
-    if (!cur) { cur = { w: '', key: '', from: al.character_start_times_seconds[i], to: 0 }; out.push(cur); }
+    if (!cur) { cur = { w: '', key: '', from: al.character_start_times_seconds[i], to: 0, at: i }; out.push(cur); }
     cur.w += ch; cur.to = al.character_end_times_seconds[i];
   });
   for (const w of out) w.key = keyOf(w.w);
   return out.filter((w) => w.key);
 }
 
-// --fit: estimated words, no audio. 150 wpm, +0.28 s per sentence end, +0.12 s per comma/dash.
+// --fit: estimated words, no audio. wpm words a minute, +0.28 s per sentence end, +0.12 s per comma/dash.
 function estimate(text: string) {
-  let t = 0;
-  return text.split(/\s+/).filter(Boolean).map((w) => {
-    const from = t; t += 60 / 150;
+  let t = 0, at = 0;
+  return text.split(/(\s+)/).flatMap((w) => {
+    const i = at; at += w.length;
+    if (!w.trim()) return [];
+    const from = t; t += 60 / (cfg.wpm ?? 160);
     if (/[.!?…]$/.test(w)) t += 0.28; else if (/[,;:—–-]$/.test(w)) t += 0.12;
-    return { w, key: keyOf(w), from, to: t - 0.05 };
+    return [{ w, key: keyOf(w), from, to: t - 0.05, at: i }];
   });
 }
 
-async function synth(id: string, text: string) {
-  const hash = createHash('sha1').update(JSON.stringify([cfg.voice, model, settings, text])).digest('hex').slice(0, 12);
+async function synth(id: string, text: string, previous: string, next: string) {
+  const hash = createHash('sha1').update(JSON.stringify([cfg.voice, model, settings, text, previous, next])).digest('hex').slice(0, 12);
   const meta = join(audio, 'vo', `${id}.json`), mp3 = join(audio, 'vo', `${id}.mp3`);
   if (existsSync(meta) && existsSync(mp3)) {
     const cached = JSON.parse(readFileSync(meta, 'utf8'));
@@ -60,9 +65,9 @@ async function synth(id: string, text: string) {
   if (!key) throw new Error('ELEVENLABS_API_KEY is not set (.env)');
   const r = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${cfg.voice}/with-timestamps?output_format=mp3_44100_128`, {
     method: 'POST', headers: { 'xi-api-key': key, 'content-type': 'application/json' },
-    body: JSON.stringify({ text, model_id: model, voice_settings: settings }),
+    body: JSON.stringify({ text, model_id: model, voice_settings: settings, previous_text: previous || undefined, next_text: next || undefined }),
   });
-  if (!r.ok) throw new Error(`ElevenLabs ${r.status} on line ${id}: ${(await r.text()).slice(0, 200)}`);
+  if (!r.ok) throw new Error(`ElevenLabs ${r.status} on paragraph ${id}: ${(await r.text()).slice(0, 200)}`);
   const d = await r.json();
   writeFileSync(mp3, Buffer.from(d.audio_base64, 'base64'));
   const duration = d.alignment.character_end_times_seconds.at(-1);
@@ -70,17 +75,35 @@ async function synth(id: string, text: string) {
   return { words: wordsFrom(d.alignment), dur: duration, mp3, fresh: true };
 }
 
-// ---- Lay the lines end to end --------------------------------------------------
+// ---- Paragraphs: consecutive lines read in one breath; a planned silence (gap ≥ breath) or "at" starts a new one
 mkdirSync(join(audio, 'vo'), { recursive: true });
+const breath = cfg.breath ?? 0.6;
+const paras: { lines: any[]; gap: number; at?: number }[] = [];
+for (const [i, l] of cfg.lines.entries()) {
+  if (i === 0 || (l.gap ?? 0) >= breath || typeof l.at === 'number') paras.push({ lines: [], gap: l.gap ?? breath, at: l.at });
+  paras.at(-1)!.lines.push(l);
+}
 const lines: Line[] = [], clips: { mp3: string; at: number }[] = [];
 let t = cfg.start ?? 0.5, calls = 0;
-for (const [i, l] of cfg.lines.entries()) {
-  if (i > 0) t += l.gap ?? cfg.gap ?? 0.35;
-  if (typeof l.at === 'number') t = l.at;
+for (const [p, para] of paras.entries()) {
+  if (p > 0) t += para.gap;
+  if (typeof para.at === 'number') t = para.at;
+  const text = para.lines.map((l) => l.text).join(' ');
   let words: Word[], dur: number;
-  if (opt.fit) { words = estimate(l.text); dur = words.at(-1)?.to ?? 0; }
-  else { const s = await synth(l.id, l.text); words = s.words; dur = s.dur; clips.push({ mp3: s.mp3, at: t }); calls += +s.fresh; }
-  lines.push({ id: l.id, text: l.text, from: t, to: t + dur, words: words.map((w) => ({ ...w, from: t + w.from, to: t + w.to })) });
+  if (opt.fit) { words = estimate(text); dur = words.at(-1)?.to ?? 0; }
+  else {
+    const prev = paras[p - 1]?.lines.map((l) => l.text).join(' ') ?? '', next = paras[p + 1]?.lines.map((l) => l.text).join(' ') ?? '';
+    const s = await synth(`p${String(p + 1).padStart(2, '0')}`, text, prev, next);
+    words = s.words; dur = s.dur; clips.push({ mp3: s.mp3, at: t }); calls += +s.fresh;
+  }
+  // cut the paragraph back into its lines by character offset
+  let off = 0;
+  for (const l of para.lines) {
+    const end = off + l.text.length, mine = words.filter((w) => w.at >= off && w.at < end);
+    const ws = mine.map((w) => ({ ...w, from: t + w.from, to: t + w.to }));
+    lines.push({ id: l.id, text: l.text, from: ws[0]?.from ?? t, to: ws.at(-1)?.to ?? t, words: ws });
+    off = end + 1;
+  }
   t += dur;
 }
 const end = lines.at(-1)?.to ?? 0;

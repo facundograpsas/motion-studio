@@ -43,7 +43,7 @@ npm run film -- films/<name> [--format all]     music → sfx → render → mix
 npm run review -- <video.mp4> [--at 4.2]        contact.png, phone.png, poster.png, loop_check.mp4, strip.png
 npm run qa -- films/<name> [--format all]       measured QA: text cut/crowding the edge/overlapping/low contrast,
                                                 empty frames, holds, seam gate → out/qa/<format>/report.md
-npm run vo -- films/<name> [--fit]              audio/vo.json → ElevenLabs per line (cached) → vo.wav + word timings
+npm run vo -- films/<name> [--fit]              audio/vo.json → ElevenLabs per paragraph (cached) → vo.wav + word timings
                                                 → timeline.src.json resolved into timeline.json (--fit: estimate only)
 npm run beats -- <song.wav> > films/<name>/audio/beats.json
 npm run sfx -- films/<name>                     audio/cues.py + timeline.json → audio/sfx.wav
@@ -174,7 +174,8 @@ meanings; lead the eye before an important read. Let the reads set the shot leng
 - Trust the beat grid only when the music is genuinely rhythmic. On calm tracks the grid is a metronome
   the tracker imposed: pace by `energy` (beats.json, 2 Hz) and phrases, and never hard-cut to it.
 - Audio is the clock: re-time picture to the music (or VO), never rush a read to fit a slot.
-- With a voice-over, the voice is the clock: one audio per line, scene lengths come from the measured voice plus a
+- With a voice-over, the voice is the clock: lines are read in paragraphs (one call each — line by line sounds stilted;
+  only planned silences, `gap` ≥ `breath`, split them), scene lengths come from the measured voice plus a
   pad, every cue is anchored to the word that causes it (`"@l4:turns"`), things to read land 0.02–0.06 s early.
   Never show words different from the ones being said. The music ducks under the voice (finalize does it);
   silence the music 1–3 s before the payoff and put the loudest hit on it.

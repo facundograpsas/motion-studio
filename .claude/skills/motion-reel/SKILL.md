@@ -13,6 +13,10 @@ a reference (frame, video or image folder), music (file → audio/track.wav, or 
 Ask only for what is missing; sensible defaults: 15s, 9:16 first, synthesized music at 120 BPM.
 
 ## Pipeline
+For investor, brand or launch films use the staged workflow in CLAUDE.md ("Workflow: stages and gates"): one fresh
+agent per stage (`prompts/10-` … `15-`), documents in `docs/` with DRAFT/APPROVED, `docs/PROGRESS.md` as the
+resume point, voice-over through `npm run vo`. The steps below are the short path for quick reels.
+
 1. `npm run new -- <name> --dur <s> --bpm <bpm>`.
 2. Gather assets from the URL with Playwright into films/<name>/assets. List them.
 3. If a reference exists, write docs/style_guide.md from it (prompts/03-reference.md).

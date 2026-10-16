@@ -1,6 +1,7 @@
 // Mix audio, normalize to -14 LUFS, mux with the picture, build review sheets.
 // node tools/finalize.ts films/<name> [--format 9x16]
-// Inputs (all optional except the video): out/<format>/silent.mp4, audio/music.wav (or track.wav), audio/sfx.wav
+// Inputs (all optional except the video): out/<format>/silent.mp4, audio/music.wav (or track.wav), audio/sfx.wav,
+// audio/vo.wav (tools/vo.ts) — with a voice-over the music ducks under it (sidechain), SFX don't
 // Output: out/<format>/final.mp4 + contact/phone/poster/loop_check
 import { spawnSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
@@ -22,13 +23,20 @@ const run = (cmd: string, args: string[]) => {
 
 // a supplied track.wav wins over synthesized music.wav
 const a = (f: string) => join(film, 'audio', f);
-const tracks = [existsSync(a('track.wav')) ? a('track.wav') : a('music.wav'), a('sfx.wav')].filter(existsSync);
+const music = existsSync(a('track.wav')) ? a('track.wav') : a('music.wav');
+const tracks = [music, a('sfx.wav'), a('vo.wav')].filter(existsSync);
 if (tracks.length === 0) {
   run('ffmpeg', ['-y', '-i', video, '-c', 'copy', final]);
   console.log('⚠ no audio in audio/ — final.mp4 is silent');
 } else {
   const inputs = tracks.flatMap((t) => ['-i', t]);
-  const amix = `${tracks.map((_, i) => `[${i + 1}:a]`).join('')}amix=inputs=${tracks.length}:normalize=0`;
+  const idx = (f: string) => tracks.indexOf(f) + 1, hasVo = existsSync(a('vo.wav')), hasMusic = existsSync(music);
+  // voice-over present: the music becomes a bed (-7 dB) and ducks further while the voice speaks (sidechain key)
+  const duck = hasVo && hasMusic
+    ? `[${idx(a('vo.wav'))}:a]asplit=2[vk][vm];[${idx(music)}:a]volume=0.45[mb];[mb][vk]sidechaincompress=threshold=0.02:ratio=8:attack=15:release=400[md];`
+    : '';
+  const labels = tracks.map((t) => (duck && t === music ? '[md]' : duck && t === a('vo.wav') ? '[vm]' : `[${idx(t)}:a]`));
+  const amix = `${duck}${labels.join('')}amix=inputs=${tracks.length}:normalize=0`;
   // two-pass loudnorm: measure, then apply linearly (one pass undershoots on short clips)
   const target = 'I=-14:TP=-1:LRA=11';
   const m = JSON.parse(run('ffmpeg', ['-i', video, ...inputs, '-filter_complex', `${amix},loudnorm=${target}:print_format=json`, '-f', 'null', '-'])

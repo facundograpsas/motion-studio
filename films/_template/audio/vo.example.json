@@ -1,0 +1,11 @@
+{
+ "voice": "<elevenlabs voice_id>",
+ "model": "eleven_multilingual_v2",
+ "settings": { "stability": 0.5, "similarity_boost": 0.75, "style": 0.2 },
+ "start": 0.6,
+ "gap": 0.35,
+ "lines": [
+  { "id": "l1", "text": "First line, exactly as it is said." },
+  { "id": "l2", "text": "A longer pause comes before this one.", "gap": 0.9 }
+ ]
+}

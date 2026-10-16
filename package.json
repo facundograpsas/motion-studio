@@ -15,6 +15,7 @@
     "film": "node tools/film.ts",
     "review": "node tools/review.ts",
     "qa": "node tools/qa.ts",
+    "vo": "node tools/vo.ts",
     "music": "node tools/music.ts",
     "sfx": "PYTHONPATH=tools .venv/bin/python -m sfx",
     "beats": ".venv/bin/python -I tools/beats.py",

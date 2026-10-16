@@ -1,7 +1,9 @@
 // Measured QA for a seek(t) film: what the eye misses in contact sheets, checked numerically.
 // node tools/qa.ts films/<name> [--format 9x16|1x1|16x9|4x5|all] [--fps 10] [--scale 0.5] [--hold 1.5]
 // Layout (every fillText/strokeText is recorded, blocks or not): text cut by the frame, text crowding
-//   the edge, texts on top of each other, low contrast against the real pixels behind them.
+//   the edge, texts on top of each other, text across the border of a card or chip, low contrast
+//   against the real pixels behind them.
+// Reading: every text stays on screen at least max(0.7 s, 0.25 + chars/17).
 // Frames: empty frames, holds where nothing moves for longer than --hold seconds.
 // Seam gate (each scene `from` in timeline.json): empty frames at the cut, a side at rest (dead beat),
 //   direction or Z sign flipping across the cut.
@@ -69,8 +71,26 @@ function hookText(size: { W: number; H: number }) {
   const cover = (ctx: any, r: { x0: number; y0: number; x1: number; y1: number }) => {
     for (const tx of w.__qaText) if (owner.get(tx) === ctx.canvas && tx.x0 >= r.x0 - 1 && tx.y0 >= r.y0 - 1 && tx.x1 <= r.x1 + 1 && tx.y1 <= r.y1 + 1) tx.alpha = 0;
   };
+  // boxes: rect/roundRect paths that get filled or stroked (cards, chips) — text must sit inside or outside, not across
+  w.__qaBoxes = [];
+  const pending = new WeakMap<object, any[]>();
   for (const P of [CanvasRenderingContext2D.prototype, OffscreenCanvasRenderingContext2D.prototype] as any[]) {
-    const fillRect = P.fillRect, clearRect = P.clearRect;
+    const fillRect = P.fillRect, clearRect = P.clearRect, beginPath = P.beginPath, rect = P.rect, roundRect = P.roundRect, fill = P.fill, stroke = P.stroke;
+    P.beginPath = function (this: any) { beginPath.call(this); pending.delete(this); };
+    for (const [name, fn] of [['rect', rect], ['roundRect', roundRect]] as const) {
+      P[name] = function (this: any, x: number, y: number, rw: number, rh: number, ...rest: any[]) {
+        fn.call(this, x, y, rw, rh, ...rest);
+        if (w.__qaOn) { const l = pending.get(this) ?? []; l.push(box(this, x, y, x + rw, y + rh)); pending.set(this, l); }
+      };
+    }
+    for (const [name, fn] of [['fill', fill], ['stroke', stroke]] as const) {
+      P[name] = function (this: any, ...a: any[]) {
+        fn.apply(this, a);
+        if (!w.__qaOn || this.globalAlpha < 0.6 || this.canvas.width !== size.W || this.canvas.height !== size.H) return;
+        for (const b of pending.get(this) ?? []) w.__qaBoxes.push(b);
+        pending.delete(this);
+      };
+    }
     P.fillRect = function (this: any, x: number, y: number, rw: number, rh: number) {
       fillRect.call(this, x, y, rw, rh);
       const opaque = typeof this.fillStyle !== 'string' || !/rgba\([^)]*,\s*0?\.\d+\)/.test(this.fillStyle);
@@ -99,9 +119,9 @@ function hookText(size: { W: number; H: number }) {
 // and mean change vs the previous call's thumbnail.
 function probe(t: number) {
   const w = window as any;
-  w.__qaText = []; w.__qaOn = true; w.seek(t); w.__qaOn = false;
+  w.__qaText = []; w.__qaBoxes = []; w.__qaOn = true; w.seek(t); w.__qaOn = false;
   const c = document.getElementById('c') as HTMLCanvasElement, W = c.width, H = c.height;
-  const TW = 96, TH = Math.max(1, Math.round(96 * H / W));
+  const TW = 160, TH = Math.max(1, Math.round(160 * H / W));
   const th = (w.__qaThumb ??= new OffscreenCanvas(TW, TH)).getContext('2d', { willReadFrequently: true })!;
   th.clearRect(0, 0, TW, TH); th.drawImage(c, 0, 0, TW, TH);
   const d = th.getImageData(0, 0, TW, TH).data;
@@ -110,13 +130,16 @@ function probe(t: number) {
   for (let i = 0; i < d.length; i += 4) { const k = (d[i] >> 4) << 8 | (d[i + 1] >> 4) << 4 | d[i + 2] >> 4; hist.set(k, (hist.get(k) ?? 0) + 1); }
   const bgk = [...hist].sort((a, b) => b[1] - a[1])[0][0];
   const bg = [((bgk >> 8) & 15) * 16 + 8, ((bgk >> 4) & 15) * 16 + 8, (bgk & 15) * 16 + 8];
-  let ink = 0, sx = 0, sy = 0, diff = 0;
+  let ink = 0, sx = 0, sy = 0, diff = 0, moved = 0;
   const prev: Uint8ClampedArray | undefined = w.__qaPrev, inkPts: number[] = [];
   for (let i = 0, p = 0; i < d.length; i += 4, p++) {
     if (Math.max(Math.abs(d[i] - bg[0]), Math.abs(d[i + 1] - bg[1]), Math.abs(d[i + 2] - bg[2])) > 28) {
       ink++; const x = (p % TW) / TW, y = Math.floor(p / TW) / TH; sx += x; sy += y; inkPts.push(x, y);
     }
-    if (prev) diff += Math.abs(d[i] - prev[i]) + Math.abs(d[i + 1] - prev[i + 1]) + Math.abs(d[i + 2] - prev[i + 2]);
+    if (prev) {
+      const dd = Math.abs(d[i] - prev[i]) + Math.abs(d[i + 1] - prev[i + 1]) + Math.abs(d[i + 2] - prev[i + 2]);
+      diff += dd; if (dd > 30) moved++;
+    }
   }
   w.__qaPrev = new Uint8ClampedArray(d);
   const cx = ink ? sx / ink : 0.5, cy = ink ? sy / ink : 0.5;
@@ -146,7 +169,8 @@ function probe(t: number) {
     }
     return { ...tx, contrast };
   });
-  return { texts, ink: ink / (TW * TH), cx, cy, spread: ink ? spread / ink : 0, diff: prev ? diff / (TW * TH * 3) : null };
+  const boxes = w.__qaBoxes.filter((b: any) => b.x1 - b.x0 > 4 && b.y1 - b.y0 > 4 && (b.x1 - b.x0) * (b.y1 - b.y0) < 0.9 * W * H);
+  return { texts, boxes, ink: ink / (TW * TH), cx, cy, spread: ink ? spread / ink : 0, diff: prev ? diff / (TW * TH * 3) : null, moved: prev ? moved : null };
 }
 
 // Frame t with boxes drawn over the given texts, as a PNG data URL
@@ -200,6 +224,11 @@ for (const fmt of formats) {
       const need = x.px >= 2.2 * U ? 3 : 4.5;
       if (x.contrast !== null && x.contrast < need) raw.push({ t, key: `con:${x.s}`, level: 'warn', kind: 'contraste', what: `${label} contraste ${x.contrast.toFixed(1)}:1 (mín ${need})`, boxes: [x] });
     }
+    for (const x of vis) for (const b of r.boxes) {
+      const ix = Math.min(x.x1, b.x1) - Math.max(x.x0, b.x0), iy = Math.min(x.y1, b.y1) - Math.max(x.y0, b.y0);
+      const inside = x.x0 >= b.x0 - 2 && x.y0 >= b.y0 - 2 && x.x1 <= b.x1 + 2 && x.y1 <= b.y1 + 2;
+      if (ix > 2 && iy > 2 && !inside) raw.push({ t, key: `box:${x.s}:${Math.round(b.x0)}`, level: 'error', kind: 'cruza', what: `${JSON.stringify(x.s.slice(0, 30))} cruza el borde de una caja`, boxes: [x, b] });
+    }
     for (let i = 0; i < vis.length; i++) for (let j = i + 1; j < vis.length; j++) {
       const a = vis[i], b = vis[j];
       const ix = Math.min(a.x1, b.x1) - Math.max(a.x0, b.x0), iy = Math.min(a.y1, b.y1) - Math.max(a.y0, b.y0);
@@ -220,10 +249,26 @@ for (const fmt of formats) {
   }
   // a layout problem has to last 2 samples to count (single-frame entry overshoots are not layout)
   const kept: Issue[] = issues.filter((i) => i.kind === 'vacío' || i.to - i.from >= 0.99 / FPS);
-  // Holds: runs where the picture barely changes
+  // Reading time: each text must stay readable for max(0.7 s, 0.25 + chars/17) the first time it shows
+  // (counters and numbers excluded; a text that comes back was already read)
+  const seen = new Map<string, number>(), read = new Set<string>();
+  for (const [n, { t, r }] of [...samples, { t: dur, r: { texts: [] } as any }].entries()) {
+    const now = new Set<string>(r.texts.filter((x: any) => x.alpha >= 0.6 && /[a-záéíóúñ]{2}/i.test(x.s)).map((x: any) => x.s));
+    for (const s of now) if (!seen.has(s)) seen.set(s, t);
+    for (const [s, t0] of [...seen]) {
+      if (now.has(s)) continue;
+      seen.delete(s);
+      if (read.has(s)) continue;
+      read.add(s);
+      const need = Math.max(0.7, 0.25 + s.length / 17), had = t - t0;
+      if (had + 0.5 / FPS < need && n < samples.length) kept.push({ level: 'warn', kind: 'lectura', from: t0, to: t,
+        what: `${JSON.stringify(s.length > 40 ? s.slice(0, 40) + '…' : s)} visible ${had.toFixed(1)}s, necesita ${need.toFixed(1)}s` });
+    }
+  }
+  // Holds: runs where no pixel of the thumbnail visibly changes (a small packet in flight still counts)
   let holdFrom: number | null = null;
-  for (const { t, r } of [...samples, { t: dur, r: { diff: Infinity } as any }]) {
-    if (r.diff !== null && r.diff < 0.15) holdFrom ??= t - 1 / FPS;
+  for (const { t, r } of [...samples, { t: dur, r: { moved: Infinity } as any }]) {
+    if (r.moved !== null && r.moved < 3) holdFrom ??= t - 1 / FPS;
     else if (holdFrom !== null) {
       if (t - holdFrom > HOLD) kept.push({ level: 'warn', kind: 'quieto', from: holdFrom, to: t, what: `nada se mueve durante ${(t - holdFrom).toFixed(1)}s` });
       holdFrom = null;

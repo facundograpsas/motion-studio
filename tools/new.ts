@@ -34,6 +34,7 @@ writeFileSync(join(dir, 'audio', 'score.json'), JSON.stringify({
 writeFileSync(join(dir, 'docs', 'review_log.md'), `# Review log — ${name}\n\n| round | hook | phone read | motion | variety | composition | brand | sound | 3 worst problems |\n|---|---|---|---|---|---|---|---|---|\n`);
 
 console.log(`✔ films/${name} (${dur}s @ ${bpm} BPM)
+  stages:   films/${name}/docs/PROGRESS.md   (brief → script → direction → voice → storyboard → build → critics)
   preview:  npm run preview            → http://localhost:5173/films/${name}/
   draft:    npm run draft -- films/${name}
   sfx:      npm run sfx -- films/${name}      (audio/cues.py on timeline.json)

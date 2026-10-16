@@ -14,6 +14,6 @@ You are writing a film's script, for the ear first. Rules:
   declaratives reads as slogans. The voice says what the picture can't; it never names what is on screen.
 - A number is set up (context before), lands alone (a [beat] of silence before it) and is translated after it.
 - 140–180 words for ~90 s: leave room for silence. Run `npm run vo -- films/[name] --fit` for the length.
-- Before handing back, run the story tests in prompts/16-story-critic.md on your own draft; a fresh critic will too.
+- Before handing back, run the story tests in prompts/16-story-critic.md (including "understood cold") on your own draft; a fresh critic will too.
 Give one script and two alternative openings (first two lines). Leave it DRAFT and stop.
 ```

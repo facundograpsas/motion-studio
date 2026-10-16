@@ -20,6 +20,8 @@ Apply each test to the script table (id, voice, picture, read). One FAIL sends t
 13 Hook: rows 1–2 raise a tension or a question; no company name.
 14 Silence: ≥ 2 [beat]s, before the key number and before the close.
 15 Callback: the last row picks up a word or entity from rows 1–5.
+16 Understood cold: someone who doesn't know the business can explain every case or example in one sentence
+   after hearing it once. A case that needs explaining is the wrong case — replace it, don't reword it.
 Also check every number against docs/facts.md (value and kind: a "stated" figure is said as stated, an
 "illustrative" one is never presented as measured).
 ```

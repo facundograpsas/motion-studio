@@ -1,7 +1,8 @@
 // Measured QA for a seek(t) film: what the eye misses in contact sheets, checked numerically.
 // node tools/qa.ts films/<name> [--format 9x16|1x1|16x9|4x5|all] [--fps 10] [--scale 0.5] [--hold 1.5]
 // Layout (every fillText/strokeText is recorded, blocks or not): text cut by the frame, text crowding
-//   the edge, texts on top of each other, low contrast against the real pixels behind them.
+//   the edge, texts on top of each other, text across the border of a card or chip, low contrast
+//   against the real pixels behind them.
 // Frames: empty frames, holds where nothing moves for longer than --hold seconds.
 // Seam gate (each scene `from` in timeline.json): empty frames at the cut, a side at rest (dead beat),
 //   direction or Z sign flipping across the cut.
@@ -69,8 +70,26 @@ function hookText(size: { W: number; H: number }) {
   const cover = (ctx: any, r: { x0: number; y0: number; x1: number; y1: number }) => {
     for (const tx of w.__qaText) if (owner.get(tx) === ctx.canvas && tx.x0 >= r.x0 - 1 && tx.y0 >= r.y0 - 1 && tx.x1 <= r.x1 + 1 && tx.y1 <= r.y1 + 1) tx.alpha = 0;
   };
+  // boxes: rect/roundRect paths that get filled or stroked (cards, chips) — text must sit inside or outside, not across
+  w.__qaBoxes = [];
+  const pending = new WeakMap<object, any[]>();
   for (const P of [CanvasRenderingContext2D.prototype, OffscreenCanvasRenderingContext2D.prototype] as any[]) {
-    const fillRect = P.fillRect, clearRect = P.clearRect;
+    const fillRect = P.fillRect, clearRect = P.clearRect, beginPath = P.beginPath, rect = P.rect, roundRect = P.roundRect, fill = P.fill, stroke = P.stroke;
+    P.beginPath = function (this: any) { beginPath.call(this); pending.delete(this); };
+    for (const [name, fn] of [['rect', rect], ['roundRect', roundRect]] as const) {
+      P[name] = function (this: any, x: number, y: number, rw: number, rh: number, ...rest: any[]) {
+        fn.call(this, x, y, rw, rh, ...rest);
+        if (w.__qaOn) { const l = pending.get(this) ?? []; l.push(box(this, x, y, x + rw, y + rh)); pending.set(this, l); }
+      };
+    }
+    for (const [name, fn] of [['fill', fill], ['stroke', stroke]] as const) {
+      P[name] = function (this: any, ...a: any[]) {
+        fn.apply(this, a);
+        if (!w.__qaOn || this.globalAlpha < 0.6 || this.canvas.width !== size.W || this.canvas.height !== size.H) return;
+        for (const b of pending.get(this) ?? []) w.__qaBoxes.push(b);
+        pending.delete(this);
+      };
+    }
     P.fillRect = function (this: any, x: number, y: number, rw: number, rh: number) {
       fillRect.call(this, x, y, rw, rh);
       const opaque = typeof this.fillStyle !== 'string' || !/rgba\([^)]*,\s*0?\.\d+\)/.test(this.fillStyle);
@@ -99,7 +118,7 @@ function hookText(size: { W: number; H: number }) {
 // and mean change vs the previous call's thumbnail.
 function probe(t: number) {
   const w = window as any;
-  w.__qaText = []; w.__qaOn = true; w.seek(t); w.__qaOn = false;
+  w.__qaText = []; w.__qaBoxes = []; w.__qaOn = true; w.seek(t); w.__qaOn = false;
   const c = document.getElementById('c') as HTMLCanvasElement, W = c.width, H = c.height;
   const TW = 160, TH = Math.max(1, Math.round(160 * H / W));
   const th = (w.__qaThumb ??= new OffscreenCanvas(TW, TH)).getContext('2d', { willReadFrequently: true })!;
@@ -149,7 +168,8 @@ function probe(t: number) {
     }
     return { ...tx, contrast };
   });
-  return { texts, ink: ink / (TW * TH), cx, cy, spread: ink ? spread / ink : 0, diff: prev ? diff / (TW * TH * 3) : null, moved: prev ? moved : null };
+  const boxes = w.__qaBoxes.filter((b: any) => b.x1 - b.x0 > 4 && b.y1 - b.y0 > 4 && (b.x1 - b.x0) * (b.y1 - b.y0) < 0.9 * W * H);
+  return { texts, boxes, ink: ink / (TW * TH), cx, cy, spread: ink ? spread / ink : 0, diff: prev ? diff / (TW * TH * 3) : null, moved: prev ? moved : null };
 }
 
 // Frame t with boxes drawn over the given texts, as a PNG data URL
@@ -202,6 +222,11 @@ for (const fmt of formats) {
       else if (Math.min(x.x0, x.y0, W - x.x1, H - x.y1) < 2 * U) raw.push({ t, key: `edge:${x.s}`, level: 'warn', kind: 'borde', what: `${label} a menos de 2u del borde`, boxes: [x] });
       const need = x.px >= 2.2 * U ? 3 : 4.5;
       if (x.contrast !== null && x.contrast < need) raw.push({ t, key: `con:${x.s}`, level: 'warn', kind: 'contraste', what: `${label} contraste ${x.contrast.toFixed(1)}:1 (mín ${need})`, boxes: [x] });
+    }
+    for (const x of vis) for (const b of r.boxes) {
+      const ix = Math.min(x.x1, b.x1) - Math.max(x.x0, b.x0), iy = Math.min(x.y1, b.y1) - Math.max(x.y0, b.y0);
+      const inside = x.x0 >= b.x0 - 2 && x.y0 >= b.y0 - 2 && x.x1 <= b.x1 + 2 && x.y1 <= b.y1 + 2;
+      if (ix > 2 && iy > 2 && !inside) raw.push({ t, key: `box:${x.s}:${Math.round(b.x0)}`, level: 'error', kind: 'cruza', what: `${JSON.stringify(x.s.slice(0, 30))} cruza el borde de una caja`, boxes: [x, b] });
     }
     for (let i = 0; i < vis.length; i++) for (let j = i + 1; j < vis.length; j++) {
       const a = vis[i], b = vis[j];

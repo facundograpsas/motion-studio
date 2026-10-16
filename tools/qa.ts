@@ -101,7 +101,7 @@ function probe(t: number) {
   const w = window as any;
   w.__qaText = []; w.__qaOn = true; w.seek(t); w.__qaOn = false;
   const c = document.getElementById('c') as HTMLCanvasElement, W = c.width, H = c.height;
-  const TW = 96, TH = Math.max(1, Math.round(96 * H / W));
+  const TW = 160, TH = Math.max(1, Math.round(160 * H / W));
   const th = (w.__qaThumb ??= new OffscreenCanvas(TW, TH)).getContext('2d', { willReadFrequently: true })!;
   th.clearRect(0, 0, TW, TH); th.drawImage(c, 0, 0, TW, TH);
   const d = th.getImageData(0, 0, TW, TH).data;
@@ -110,13 +110,16 @@ function probe(t: number) {
   for (let i = 0; i < d.length; i += 4) { const k = (d[i] >> 4) << 8 | (d[i + 1] >> 4) << 4 | d[i + 2] >> 4; hist.set(k, (hist.get(k) ?? 0) + 1); }
   const bgk = [...hist].sort((a, b) => b[1] - a[1])[0][0];
   const bg = [((bgk >> 8) & 15) * 16 + 8, ((bgk >> 4) & 15) * 16 + 8, (bgk & 15) * 16 + 8];
-  let ink = 0, sx = 0, sy = 0, diff = 0;
+  let ink = 0, sx = 0, sy = 0, diff = 0, moved = 0;
   const prev: Uint8ClampedArray | undefined = w.__qaPrev, inkPts: number[] = [];
   for (let i = 0, p = 0; i < d.length; i += 4, p++) {
     if (Math.max(Math.abs(d[i] - bg[0]), Math.abs(d[i + 1] - bg[1]), Math.abs(d[i + 2] - bg[2])) > 28) {
       ink++; const x = (p % TW) / TW, y = Math.floor(p / TW) / TH; sx += x; sy += y; inkPts.push(x, y);
     }
-    if (prev) diff += Math.abs(d[i] - prev[i]) + Math.abs(d[i + 1] - prev[i + 1]) + Math.abs(d[i + 2] - prev[i + 2]);
+    if (prev) {
+      const dd = Math.abs(d[i] - prev[i]) + Math.abs(d[i + 1] - prev[i + 1]) + Math.abs(d[i + 2] - prev[i + 2]);
+      diff += dd; if (dd > 30) moved++;
+    }
   }
   w.__qaPrev = new Uint8ClampedArray(d);
   const cx = ink ? sx / ink : 0.5, cy = ink ? sy / ink : 0.5;
@@ -146,7 +149,7 @@ function probe(t: number) {
     }
     return { ...tx, contrast };
   });
-  return { texts, ink: ink / (TW * TH), cx, cy, spread: ink ? spread / ink : 0, diff: prev ? diff / (TW * TH * 3) : null };
+  return { texts, ink: ink / (TW * TH), cx, cy, spread: ink ? spread / ink : 0, diff: prev ? diff / (TW * TH * 3) : null, moved: prev ? moved : null };
 }
 
 // Frame t with boxes drawn over the given texts, as a PNG data URL
@@ -220,10 +223,10 @@ for (const fmt of formats) {
   }
   // a layout problem has to last 2 samples to count (single-frame entry overshoots are not layout)
   const kept: Issue[] = issues.filter((i) => i.kind === 'vacío' || i.to - i.from >= 0.99 / FPS);
-  // Holds: runs where the picture barely changes
+  // Holds: runs where no pixel of the thumbnail visibly changes (a small packet in flight still counts)
   let holdFrom: number | null = null;
-  for (const { t, r } of [...samples, { t: dur, r: { diff: Infinity } as any }]) {
-    if (r.diff !== null && r.diff < 0.15) holdFrom ??= t - 1 / FPS;
+  for (const { t, r } of [...samples, { t: dur, r: { moved: Infinity } as any }]) {
+    if (r.moved !== null && r.moved < 3) holdFrom ??= t - 1 / FPS;
     else if (holdFrom !== null) {
       if (t - holdFrom > HOLD) kept.push({ level: 'warn', kind: 'quieto', from: holdFrom, to: t, what: `nada se mueve durante ${(t - holdFrom).toFixed(1)}s` });
       holdFrom = null;

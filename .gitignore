@@ -16,3 +16,4 @@ films/*
 !films/demo/
 !films/rig-sheet/
 !films/people-sheet/
+!films/blocks-sheet/

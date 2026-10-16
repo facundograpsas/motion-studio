@@ -29,6 +29,8 @@ npm run review -- films/my-film/out/9x16/silent.mp4 --at 4.2
 npm run film -- films/my-film --format all   # final 60fps + motion blur, mixed to -14 LUFS
 ```
 `films/demo` is a working example of the whole pipeline (scenes, springs, morph, music, SFX).
+`films/blocks-sheet` shows `lib/blocks.js` (counter, bars, pill, cursor) and `lib/gl.js` (3D phone and laptop,
+glitch seam). `npm run qa -- films/<name> --format all` checks layout, empty frames, holds and seams before you look.
 
 ## Prompts
 `prompts/` holds the patterns from the course: one-liner showreel, brand reel, reference-first,

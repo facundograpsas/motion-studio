@@ -1,0 +1,129 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>blocks-sheet</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter+Tight:wght@500;700;800&family=Source+Serif+4:opsz,wght@8..60,700&display=block" rel="stylesheet">
+<style>html,body{margin:0;background:#141413;overflow:hidden}canvas{display:block;max-width:100vw;max-height:100vh;margin:auto}</style>
+<canvas id="c"></canvas>
+<script type="module">
+import { springP, track, clamp, powIn, powOut, format, mountFilm, cutCurve, local } from '/lib/motion.js';
+import { blocks } from '/lib/blocks.js';
+import { stage, phone, laptop, postFx } from '/lib/gl.js';
+import TL from './timeline.json' with { type: 'json' };
+
+// Model sheet for lib/blocks.js and lib/gl.js: counter, bars, pill, cursor click and stamp in 2D; a 3D
+// phone and laptop whose screens are painted with the same blocks; a glitch seam (postFx) and a cut.
+// Run `npm run qa -- films/blocks-sheet` after touching either library.
+const DUR = TL.duration;
+const PAL = { bg: '#141413', ink: '#F0EEE6', ink2: '#A3A097', accent: '#D97757', mute: '#3D3D3A', card: '#FAF9F5', cardInk: '#1F1E1D' };
+const DISPLAY = '"Source Serif 4", serif', UI = '"Inter Tight", sans-serif';
+const DATA = [{ label: 'Canal A', value: 312 }, { label: 'Canal B', value: 198 }, { label: 'Canal C', value: 141 }, { label: 'Canal D', value: 94 }];
+
+const F = format(), { W, H, u, cx, cy, vertical } = F;
+const cv = document.getElementById('c');
+cv.width = W; cv.height = H;
+const main = cv.getContext('2d');
+const layer = new OffscreenCanvas(W, H), g = layer.getContext('2d');
+const B = blocks(g, F, { PAL, UI, DISPLAY });
+
+// 3D: one stage, two devices; their screens are 2D canvases painted with blocks every frame
+const S = stage(F);
+const ph = phone((vertical ? 44 : 30) * u), lap = laptop((vertical ? 84 : 92) * u);
+S.scene.add(ph.group, lap.group);
+const screenBlocks = (scr) => blocks(scr.ctx, { u: Math.min(scr.w, scr.h) / 100 }, { PAL: { ...PAL, ink: PAL.cardInk, ink2: '#6B6A65', bg: PAL.card }, UI, DISPLAY });
+const PB = screenBlocks(ph.screen), LB = screenBlocks(lap.screen);
+const fx = postFx(W, H);
+
+// ---- Seams: CURRENT = left; the entry into the 3D chapter is a glitch (cut-the-curve + chroma/warp peak)
+const CURRENT = 'left';
+const SEAMS = { phone: { glitch: true } };
+
+const SCENES = [
+  { id: 'blocks', draw(t, k) {
+      const x0 = 8 * u, top = vertical ? cy - 62 * u : 12 * u;
+      B.pill('BLOCKS', x0, top, { size: 2, alpha: t >= k.title ? 1 : 0 });
+      const ts = springP(t - k.title, 'heavy');
+      g.save(); g.translate(0, (1 - ts) * 4 * u);
+      B.txt('Ventas por canal, hoy', x0, top + 9 * u, { size: 5.5, weight: 700, font: DISPLAY });
+      g.restore();
+      const v = B.counter(t, [[0, 0], [k.count, 745]], x0, top + 26 * u, { size: 14 });
+      B.txt('ventas', x0 + B.measure(B.fmtInt(v), 14, 700, DISPLAY) + 2 * u, top + 26 * u, { size: 3.5, color: PAL.ink2 });
+      const bh = vertical ? 46 * u : 34 * u, bw = W - 16 * u;
+      B.bars(t, x0, top + 32 * u, vertical ? bw : bw * 0.55, bh, DATA, { t0: k.bars, horizontal: true, size: 2.6 });
+      // the cursor travels to the button; its click stamps the export
+      const bx = vertical ? cx : W - 26 * u, by = vertical ? top + 32 * u + bh + 14 * u : cy + 8 * u;
+      const press = t - k.click, down = press >= 0 && press < 0.18;
+      B.pill('Exportar', bx, by, { size: 3, align: 'center', fill: down ? PAL.ink : PAL.accent, color: PAL.bg });
+      B.stamp('LISTO', bx + 14 * u, by - 9 * u, press - 0.05, { size: 3 });
+      const px = track(t, [[0, W + 6 * u], [k.cursor[0], bx + 18 * u], [k.cursor[1], bx + 2 * u]], 'base');
+      const py = track(t, [[0, by + 30 * u], [k.cursor[0], by + 12 * u], [k.cursor[1], by + 1 * u]], 'base');
+      B.cursor(px, py, { press: press >= 0 ? press : -1 });
+  }},
+  { id: 'phone', gl: true, draw(t, k) {
+      const scr = ph.screen, c = scr.ctx, su = Math.min(scr.w, scr.h) / 100;
+      c.fillStyle = PAL.card; c.fillRect(0, 0, scr.w, scr.h);
+      PB.txt('Hoy', 8 * su, 22 * su, { size: 6, weight: 700, color: '#6B6A65' });
+      PB.counter(t, [[0, 0], [k.count, 128]], 8 * su, 48 * su, { size: 22 });
+      PB.pill('+12% vs ayer', 8 * su, 60 * su, { size: 4.2, fill: PAL.accent, color: PAL.card });
+      PB.bars(t, 6 * su, 72 * su, 88 * su, scr.h - 80 * su, DATA, { t0: k.bars, size: 4.2, color: PAL.cardInk });
+      PB.ring(70 * su, 60 * su, 6 * su, t - k.tap, PAL.accent, 1);
+      scr.update();
+      ph.group.visible = true; lap.group.visible = false;
+      // arrives already turning (vector law), settles, then turns toward the exit
+      ph.group.rotation.y = track(t + 0.2, [[0, -1.2], [0, -0.38], [k.turn + 0.2, 0.55]], 'heavy');
+      ph.group.rotation.x = -0.08; ph.group.position.set(0, 0, 0);
+      S.aim(0, 0.06, 1);
+      g.drawImage(S.render(), 0, 0);
+      B.pill('3D · Three.js', 8 * u, (vertical ? 12 : 8) * u, { size: 2, fill: PAL.mute, color: PAL.ink });
+  }},
+  { id: 'laptop', gl: true, draw(t, k) {
+      const scr = lap.screen, c = scr.ctx, su = Math.min(scr.w, scr.h) / 100;
+      c.fillStyle = PAL.card; c.fillRect(0, 0, scr.w, scr.h);
+      LB.txt('Semana', 8 * su, 16 * su, { size: 8, weight: 700, font: DISPLAY, alpha: springP(t - k.ui, 'snappy') > 0.05 ? 1 : 0 });
+      LB.bars(t, 8 * su, 22 * su, scr.w - 16 * su, scr.h - 28 * su,
+        ['lun', 'mar', 'mié', 'jue', 'vie', 'sáb', 'dom'].map((label, i) => ({ label, value: [96, 120, 104, 141, 168, 77, 58][i] })),
+        { t0: k.ui, size: 5, color: PAL.accent });
+      scr.update();
+      ph.group.visible = false; lap.group.visible = true;
+      lap.open(clamp(0.2 + 0.8 * springP(t - k.open + 0.12, 'heavy'), 0, 1.02));
+      lap.group.position.set(0, -12 * u, -lap.depth / 2);
+      S.aim(track(t, [[0, -0.26], [k.push, -0.08]], 'heavy'), track(t, [[0, 0.5], [k.push, 0.24]], 'heavy'), track(t, [[0, 0.95], [k.push, 1.2]], 'heavy'), [0, 8 * u, 0]);
+      g.drawImage(S.render(), 0, 0);
+      B.pill('Pantalla = canvas 2D', 8 * u, (vertical ? 12 : 8) * u, { size: 2, fill: PAL.mute, color: PAL.ink });
+  }},
+].map((s) => ({ ...s, from: TL[s.id].from, to: TL[s.id].to, k: local(TL[s.id]) }));
+
+const seamFx = (id, side, t) => cutCurve(t, TL[id].from, F, SEAMS[id]?.dir ?? CURRENT)[side];
+// glitch seams: chroma/warp ramp in (power in) to the cut and out (power out) after it, same peak both sides
+function glitch(t) {
+  let a = 0;
+  for (const [id, s] of Object.entries(SEAMS)) if (s.glitch) {
+    const tc = TL[id].from;
+    a = Math.max(a, t < tc ? powIn(clamp((t - (tc - 0.25)) / 0.25), 3) : 1 - powOut(clamp((t - tc) / 0.35), 3));
+  }
+  return a;
+}
+
+function draw(t) {
+  main.globalAlpha = 1; main.filter = 'none'; main.fillStyle = PAL.bg; main.fillRect(0, 0, W, H);
+  const i = SCENES.findIndex((sc) => t >= sc.from && t < sc.to), s = SCENES[i], next = SCENES[i + 1];
+  if (!s) return;
+  g.clearRect(0, 0, W, H); g.globalAlpha = 1;
+  s.draw(t - s.from, s.k);
+  const fxs = [i > 0 && seamFx(s.id, 'in', t), next && seamFx(next.id, 'out', t)].filter(Boolean);
+  main.save();
+  main.globalAlpha = fxs.reduce((a, f) => a * f.alpha, 1);
+  main.drawImage(layer, fxs.reduce((a, f) => a + f.x, 0), fxs.reduce((a, f) => a + f.y, 0));
+  main.restore();
+  const a = glitch(t);
+  if (a > 0.01) main.drawImage(fx.apply(cv, { chroma: 16 * a * (W / 1080), warp: 22 * a * (W / 1080) }), 0, 0);
+}
+
+mountFilm({
+  dur: DUR,
+  async init() {
+    await Promise.all([`700 10px ${DISPLAY}`, `500 10px ${UI}`, `700 10px ${UI}`, `800 10px ${UI}`].map((f) => document.fonts.load(f)));
+  },
+  draw,
+});
+</script>

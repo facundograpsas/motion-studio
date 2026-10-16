@@ -130,10 +130,12 @@ function probe(t: number) {
   for (let i = 0; i < d.length; i += 4) { const k = (d[i] >> 4) << 8 | (d[i + 1] >> 4) << 4 | d[i + 2] >> 4; hist.set(k, (hist.get(k) ?? 0) + 1); }
   const bgk = [...hist].sort((a, b) => b[1] - a[1])[0][0];
   const bg = [((bgk >> 8) & 15) * 16 + 8, ((bgk >> 4) & 15) * 16 + 8, (bgk & 15) * 16 + 8];
-  let ink = 0, sx = 0, sy = 0, diff = 0, moved = 0;
+  let ink = 0, sx = 0, sy = 0, diff = 0, moved = 0, mass = 0;   // mass: how strongly the content shows (fades lower it)
   const prev: Uint8ClampedArray | undefined = w.__qaPrev, inkPts: number[] = [];
   for (let i = 0, p = 0; i < d.length; i += 4, p++) {
-    if (Math.max(Math.abs(d[i] - bg[0]), Math.abs(d[i + 1] - bg[1]), Math.abs(d[i + 2] - bg[2])) > 28) {
+    const dd = Math.max(Math.abs(d[i] - bg[0]), Math.abs(d[i + 1] - bg[1]), Math.abs(d[i + 2] - bg[2]));
+    mass += dd;
+    if (dd > 28) {
       ink++; const x = (p % TW) / TW, y = Math.floor(p / TW) / TH; sx += x; sy += y; inkPts.push(x, y);
     }
     if (prev) {
@@ -170,7 +172,7 @@ function probe(t: number) {
     return { ...tx, contrast };
   });
   const boxes = w.__qaBoxes.filter((b: any) => b.x1 - b.x0 > 4 && b.y1 - b.y0 > 4 && (b.x1 - b.x0) * (b.y1 - b.y0) < 0.9 * W * H);
-  return { texts, boxes, ink: ink / (TW * TH), cx, cy, spread: ink ? spread / ink : 0, diff: prev ? diff / (TW * TH * 3) : null, moved: prev ? moved : null };
+  return { texts, boxes, ink: ink / (TW * TH), mass: mass / (TW * TH * 255), cx, cy, spread: ink ? spread / ink : 0, diff: prev ? diff / (TW * TH * 3) : null, moved: prev ? moved : null };
 }
 
 // Frame t with boxes drawn over the given texts, as a PNG data URL
@@ -294,6 +296,12 @@ for (const fmt of formats) {
     const emptyPre = pre.filter((f) => f.r.ink < 0.004).length, emptyPost = post.filter((f) => f.r.ink < 0.004).length;
     if (emptyPre > 3) notes.push(`error: la salida pasa ${emptyPre} frames vacía antes del corte`);
     if (emptyPost) notes.push(`error: la escena entrante tiene ${emptyPost} frame(s) vacío(s) (debe llegar compuesta)`);
+    // crossfade: not empty (faint ghosts on a light page still count as ink) but most of the content is gone on
+    // both sides of the cut. cutCurve dims ~6–7 frames around it (exit ramp + entry at 35 %); a crossfade dims 10+ on both sides.
+    // reference: how strongly each scene shows 0.6 s away from the cut (outside any fade)
+    const ref = Math.min((await page.evaluate(probe, c.t - 0.6)).mass, (await page.evaluate(probe, Math.min(dur - 0.01, c.t + 0.6))).mass);
+    const dim = fr.filter((f) => f.r.mass < 0.35 * ref).length;
+    if (ref > 0.002 && dim > 9) notes.push(`error: fundido — ${dim} frames alrededor del corte con menos del 35 % del contraste de las escenas (debe pasar en movimiento)`);
     if (ePre < 0.3) notes.push('warn: la escena saliente llega quieta al corte');
     if (ePost < 0.3) notes.push('warn: la escena entrante arranca quieta');
     const axis = Math.abs(vPre.x) + Math.abs(vPost.x) >= Math.abs(vPre.y) + Math.abs(vPost.y) ? 'x' : 'y';

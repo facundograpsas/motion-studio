@@ -1,6 +1,7 @@
-// Voice-over as the film's clock. Lines are read in paragraphs, the way a narrator reads them: consecutive lines are
-// one ElevenLabs call (cached by content, with the neighbouring paragraphs as context so the intonation carries on);
-// a line whose "gap" is at least `breath` (default 0.6 s) starts a new paragraph after that planned silence.
+// Voice-over as the film's clock. The whole script is one read, the way a narrator reads it: one ElevenLabs call
+// (cached by content). A line whose "gap" is at least `breath` (default 0.6 s) gets a planned pause written into the
+// text (<break time="1.2s" />), so the narrator pauses inside the same take — separate calls sound like cuts.
+// Only a line with "at" (a fixed start time) starts a separate take.
 // Word timings come from the API's character alignment and are cut back into lines; timeline.src.json references
 // are resolved into timeline.json.
 // node tools/vo.ts films/<name> [--fit]
@@ -75,35 +76,51 @@ async function synth(id: string, text: string, previous: string, next: string) {
   return { words: wordsFrom(d.alignment), dur: duration, mp3, fresh: true };
 }
 
-// ---- Paragraphs: consecutive lines read in one breath; a planned silence (gap ≥ breath) or "at" starts a new one
+// ---- Takes: one for the whole script, unless a line pins its start with "at"
 mkdirSync(join(audio, 'vo'), { recursive: true });
 const breath = cfg.breath ?? 0.6;
 const paras: { lines: any[]; gap: number; at?: number }[] = [];
 for (const [i, l] of cfg.lines.entries()) {
-  if (i === 0 || (l.gap ?? 0) >= breath || typeof l.at === 'number') paras.push({ lines: [], gap: l.gap ?? breath, at: l.at });
+  if (i === 0 || typeof l.at === 'number') paras.push({ lines: [], gap: l.gap ?? breath, at: l.at });
   paras.at(-1)!.lines.push(l);
 }
+// the take's text: lines joined by a space, or by a written pause before a line with a planned silence
+const joinTake = (ls: any[]) => {
+  let text = '';
+  const offs = ls.map((l, i) => {
+    if (i > 0) text += (l.gap ?? 0) >= breath ? ` <break time="${Math.min(3, l.gap).toFixed(1)}s" /> ` : ' ';
+    const at = text.length; text += l.text; return at;
+  });
+  return { text, offs };
+};
 const lines: Line[] = [], clips: { mp3: string; at: number }[] = [];
 let t = cfg.start ?? 0.5, calls = 0;
 for (const [p, para] of paras.entries()) {
   if (p > 0) t += para.gap;
   if (typeof para.at === 'number') t = para.at;
-  const text = para.lines.map((l) => l.text).join(' ');
+  const { text, offs } = joinTake(para.lines);
   let words: Word[], dur: number;
-  if (opt.fit) { words = estimate(text); dur = words.at(-1)?.to ?? 0; }
+  if (opt.fit) {   // estimate each line on its own and add the planned pauses
+    words = []; let tt = 0;
+    para.lines.forEach((l, i) => {
+      if (i > 0) tt += (l.gap ?? 0) >= breath ? l.gap : 0.3;
+      for (const w of estimate(l.text)) words.push({ ...w, from: tt + w.from, to: tt + w.to, at: offs[i] + w.at });
+      tt = words.at(-1)!.to;
+    });
+    dur = tt;
+  }
   else {
-    const prev = paras[p - 1]?.lines.map((l) => l.text).join(' ') ?? '', next = paras[p + 1]?.lines.map((l) => l.text).join(' ') ?? '';
+    const prev = paras[p - 1] ? joinTake(paras[p - 1].lines).text : '', next = paras[p + 1] ? joinTake(paras[p + 1].lines).text : '';
     const s = await synth(`p${String(p + 1).padStart(2, '0')}`, text, prev, next);
     words = s.words; dur = s.dur; clips.push({ mp3: s.mp3, at: t }); calls += +s.fresh;
   }
-  // cut the paragraph back into its lines by character offset
-  let off = 0;
-  for (const l of para.lines) {
-    const end = off + l.text.length, mine = words.filter((w) => w.at >= off && w.at < end);
+  // cut the take back into its lines by character offset (the alignment covers the pause tags too; they fall
+  // between lines and belong to none)
+  para.lines.forEach((l, i) => {
+    const off = offs[i], end = off + l.text.length, mine = words.filter((w) => w.at >= off && w.at < end);
     const ws = mine.map((w) => ({ ...w, from: t + w.from, to: t + w.to }));
     lines.push({ id: l.id, text: l.text, from: ws[0]?.from ?? t, to: ws.at(-1)?.to ?? t, words: ws });
-    off = end + 1;
-  }
+  });
   t += dur;
 }
 const end = lines.at(-1)?.to ?? 0;

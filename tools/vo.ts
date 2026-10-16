@@ -8,7 +8,9 @@
 // are resolved into timeline.json.
 // node tools/vo.ts films/<name> [--fit]
 //   --fit   no API calls: estimate from the words (vo.json "wpm", default 160, + pauses) to check the script fits
-// Input  audio/vo.json   { voice, model?, settings?, start?, breath?, wpm?, lines: [{ id, text, gap?, at?, take? }] }
+// Input  audio/vo.json   { voice, model?, settings?, start?, breath?, wpm?, lines: [{ id, text, gap?, at?, take?, pad? }] }
+//        "pad": seconds of extra silence after a line — the take is split in the natural pause and the rest pushed
+//        later, so a scene gets room without regenerating an approved read
 //        timeline.src.json (optional) — like timeline.json, but any string "@ref" is resolved:
 //          "@l3" line start · "@l3.end" line end · "@l3:finds" start of that word (· "#2" second one)
 //          "@end" last line's end · any of them + an offset: "@l3:finds+0.2", "@l2.end-0.1"
@@ -130,13 +132,13 @@ const joinTake = (ls: any[], plain = false) => {
   });
   return { text, offs };
 };
-const lines: Line[] = [], clips: { mp3: string; at: number }[] = [];
+const lines: Line[] = [], clips: { mp3: string; at: number; from?: number; to?: number }[] = [];
 let t = cfg.start ?? 0.5, calls = 0;
 for (const [p, para] of paras.entries()) {
   if (p > 0) t += para.gap;
   if (typeof para.at === 'number') t = para.at;
   const { text, offs } = joinTake(para.lines, !!para.take);
-  let words: Word[], dur: number;
+  let words: Word[], dur: number, take: string | undefined;
   if (opt.fit) {   // estimate each line on its own and add the planned pauses
     words = []; let tt = 0;
     para.lines.forEach((l, i) => {
@@ -149,16 +151,27 @@ for (const [p, para] of paras.entries()) {
   else {
     const prev = paras[p - 1] ? joinTake(paras[p - 1].lines).text : '', next = paras[p + 1] ? joinTake(paras[p + 1].lines).text : '';
     const s = para.take ? await align(join(audio, para.take), text) : await synth(`p${String(p + 1).padStart(2, '0')}`, text, prev, next);
-    words = s.words; dur = s.dur; clips.push({ mp3: s.mp3, at: t }); calls += +s.fresh;
+    words = s.words; dur = s.dur; take = s.mp3; calls += +s.fresh;
   }
   // cut the take back into its lines by character offset (the alignment covers the pause tags too; they fall
   // between lines and belong to none)
+  const per = para.lines.map((l, i) => words.filter((w) => w.at >= offs[i] && w.at < offs[i] + l.text.length));
+  // "pad": extra silence after a line. The take is split in the middle of the natural pause before the next line
+  // and the rest is pushed later — the read is never regenerated, only given room to breathe.
+  let shift = 0, seg = 0;
   para.lines.forEach((l, i) => {
-    const off = offs[i], end = off + l.text.length, mine = words.filter((w) => w.at >= off && w.at < end);
-    const ws = mine.map((w) => ({ ...w, from: t + w.from, to: t + w.to }));
-    lines.push({ id: l.id, text: l.text, from: ws[0]?.from ?? t, to: ws.at(-1)?.to ?? t, words: ws });
+    const ws = per[i].map((w) => ({ ...w, from: t + shift + w.from, to: t + shift + w.to }));
+    lines.push({ id: l.id, text: l.text, from: ws[0]?.from ?? t + shift, to: ws.at(-1)?.to ?? t + shift, words: ws });
+    const pad = l.pad ?? 0;
+    if (pad > 0 && i < para.lines.length - 1) {
+      const cut = ((per[i].at(-1)?.to ?? seg) + (per[i + 1][0]?.from ?? seg)) / 2;
+      if (take) clips.push({ mp3: take, at: t + shift + seg, from: seg, to: cut });
+      seg = cut;
+    }
+    shift += pad;
   });
-  t += dur;
+  if (take) clips.push({ mp3: take, at: t + (shift - (para.lines.at(-1).pad ?? 0)) + seg, from: seg });
+  t += dur + shift;
 }
 const end = lines.at(-1)?.to ?? 0;
 for (const l of lines) console.log(`${l.id.padEnd(6)} ${l.from.toFixed(2).padStart(6)}–${l.to.toFixed(2).padStart(6)}s  ${l.text.slice(0, 70)}`);
@@ -168,7 +181,8 @@ writeFileSync(join(audio, 'vo_words.json'), JSON.stringify({ estimate: opt.fit, 
 // ---- audio/vo.wav: every line at its place -----------------------------------------------
 if (!opt.fit && clips.length) {
   const inputs = clips.flatMap((c) => ['-i', c.mp3]);
-  const fc = clips.map((c, i) => `[${i}]aresample=48000,aformat=channel_layouts=stereo,adelay=${Math.round(c.at * 1000)}:all=1[v${i}]`).join(';') +
+  const trim = (c: (typeof clips)[number]) => c.from === undefined ? '' : `atrim=start=${c.from.toFixed(3)}${c.to === undefined ? '' : `:end=${c.to.toFixed(3)}`},asetpts=PTS-STARTPTS,`;
+  const fc = clips.map((c, i) => `[${i}]${trim(c)}aresample=48000,aformat=channel_layouts=stereo,adelay=${Math.round(c.at * 1000)}:all=1[v${i}]`).join(';') +
     ';' + clips.map((_, i) => `[v${i}]`).join('') + `amix=inputs=${clips.length}:normalize=0,loudnorm=I=-16:TP=-1.5:LRA=7,aresample=48000,apad=whole_dur=${(end + 1).toFixed(2)}[out]`; // speech at -16 LUFS
   const r = spawnSync('ffmpeg', ['-y', '-loglevel', 'error', ...inputs, '-filter_complex', fc, '-map', '[out]', join(audio, 'vo.wav')], { encoding: 'utf8' });
   if (r.status !== 0) throw new Error(r.stderr);

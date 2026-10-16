@@ -1,4 +1,5 @@
-// Full pipeline for one film: music (if score.json and no supplied track) → sfx (cues.py, or legacy cues.json) → render → finalize.
+// Full pipeline for one film: voice-over (audio/vo.json, cached) → music (if score.json and no supplied track)
+// → sfx (cues.py, or legacy cues.json) → render → finalize.
 // node tools/film.ts films/<name> [--format 9x16|1x1|16x9|all] [any render.ts flag]
 import { spawnSync } from 'node:child_process';
 import { existsSync, writeFileSync } from 'node:fs';
@@ -18,6 +19,8 @@ const step = (script: string, ...a: string[]) => {
   if (r.status !== 0) process.exit(r.status ?? 1);
 };
 
+// the voice sets the clock: it rewrites timeline.json from timeline.src.json before music and sfx read it
+if (existsSync(join(audio, 'vo.json'))) step('vo.ts', film);
 if (existsSync(join(audio, 'track.wav'))) {
   // supplied track wins: measure it so the picture follows the real beats
   const r = spawnSync(join(tools, '..', '.venv', 'bin', 'python'), ['-I', join(tools, 'beats.py'), join(audio, 'track.wav')]);

@@ -6,15 +6,19 @@ renders it and ffmpeg encodes it. Opus writes the program, renders it, looks at 
 ## Layout
 - `films/<name>/timeline.json` — the film's clock: `duration` + one object per scene (`from`, `to` and its named
   beats, absolute seconds). The picture imports it and `audio/cues.py` reads it, so retiming is one edit.
+  With a voice-over it is generated: `timeline.src.json` holds the same shape with references to words
+  (`"@l3:turns"`, `"@l2.end+0.2"`, `"@end"`) and `tools/vo.ts` resolves them.
 - `films/<name>/index.html` — one film. Canvas `#c`, `mountFilm({ dur, init, draw })` from `/lib/motion.js`.
-- `films/<name>/audio/` — `score.json` (synth music) or `track.wav` (supplied), `cues.py` (SFX cue sheet), `beats.json` (grid).
+- `films/<name>/audio/` — `score.json` (synth music) or `track.wav` (supplied), `cues.py` (SFX cue sheet), `beats.json` (grid),
+  `vo.json` (voice-over lines → `vo/`, `vo.wav`, `vo_words.json`).
   Older films still use `cues.json` (legacy `tools/sfx.ts`); `npm run film` picks whichever exists.
-- `films/<name>/docs/` — `style_guide.md`, `shotlist.md`, `review_log.md` (and `ANIMATION_GUIDE.md` when using subagents).
+- `films/<name>/docs/` — the stage documents (`PROGRESS.md`, `brief.md`, `facts.md`, `script.md`, `style_guide.md`)
+  and `review_log.md` (older films: `shotlist.md`, `ANIMATION_GUIDE.md`).
 - `films/<name>/refs/`, `assets/` — references and real product assets for that film.
 - `films/_template/` — starting point. `films/demo/` — working example of every piece of the pipeline.
 - Productions are local only: `films/*` is gitignored except the harness (`_template`, `demo`, the model sheets).
   This repo never holds a production's content, brand or data.
-- `lib/motion.js` — springs, `track()`, `indicator()`, `swapAlpha()`, `rng()`, `format()`, beat helpers,
+- `lib/motion.js` — springs (`springV(t, duration, bounce)` asks for the look, not stiffness), `track()`, `indicator()`, `swapAlpha()`, `rng()`, `format()`, beat helpers,
   seams (`cutCurve()`, `zoomThrough()`), `nudge()`, `waterfall()`, `local()` (scene beats → scene-local times).
 - `lib/blocks.js` — `blocks(g, F, { PAL, UI, DISPLAY })`: the helpers films used to copy (`txt`, `measure`, `wrap`,
   `para`, `fit`, `rr`, `circle`, `ring`, `stamp`) plus `pill()`, `counter()` (lands exactly on its target),
@@ -25,7 +29,8 @@ renders it and ffmpeg encodes it. Opus writes the program, renders it, looks at 
   Model sheet: `films/blocks-sheet/`.
 - `tools/*.ts` (Node 26 runs TS natively), `tools/beats.py` and `tools/sfx/` (SFX engine, uses `.venv`;
   adapted from whaleyxbt/claude-motion, MIT).
-- `prompts/` — prompt patterns (one-liner, brand, reference, UI-morph spec, director brief, critique pass, independent critic).
+- `prompts/` — prompt patterns (one-liner, brand, reference, UI-morph spec, director brief, critique pass, independent critic)
+  and one prompt per stage of the workflow (`10-` producer … `15-` critics).
 - `references/` — cloned repos for study only (gitignored, never run their code from here).
 
 ## Commands
@@ -38,11 +43,34 @@ npm run film -- films/<name> [--format all]     music → sfx → render → mix
 npm run review -- <video.mp4> [--at 4.2]        contact.png, phone.png, poster.png, loop_check.mp4, strip.png
 npm run qa -- films/<name> [--format all]       measured QA: text cut/crowding the edge/overlapping/low contrast,
                                                 empty frames, holds, seam gate → out/qa/<format>/report.md
+npm run vo -- films/<name> [--fit]              audio/vo.json → ElevenLabs per line (cached) → vo.wav + word timings
+                                                → timeline.src.json resolved into timeline.json (--fit: estimate only)
 npm run beats -- <song.wav> > films/<name>/audio/beats.json
 npm run sfx -- films/<name>                     audio/cues.py + timeline.json → audio/sfx.wav
 npm run sfx -- --list                           SFX generators and what each is for
 ```
 Formats: `9x16` (1080x1920, default), `1x1`, `16x9`, `4x5`. Output: `films/<name>/out/<format>/final.mp4`.
+
+## Workflow: stages and gates (films that matter: investor, brand, launch)
+One agent doing everything loses focus. Each stage is done by an agent with a clean context that reads only the
+APPROVED documents of the stage before and writes one document; only the user moves a document from DRAFT to
+APPROVED. The hand-off is the document on disk, never the chat. `docs/PROGRESS.md` says where the film is.
+
+| # | stage | prompt | writes | gate |
+|---|---|---|---|---|
+| 0 | brief + facts | `10-producer-brief` | `docs/brief.md`, `docs/facts.md` | user, text |
+| 1 | script | `11-scriptwriter` | `docs/script.md` (+ `npm run vo --fit`) | user, text |
+| 2 | direction (3 → 1, jury) | `12-director` | `docs/style_guide.md` | user picks |
+| 3 | voice | `13-storyboard` | `audio/vo.json`, `timeline.src.json` | user listens |
+| 4 | storyboard from code | `13-storyboard` | one still per beat | user, pixels |
+| 5 | build: test scene, then the rest | `14-scene-builder` | `index.html` (one scene per builder) | test scene |
+| 6 | QA + three critics | `15-critics` | `out/qa/`, `docs/review_log.md` | side by side |
+| 7 | sound + master | — | `out/<format>/final.mp4` | — |
+| 8 | learn | — | every user note becomes a rule here or in the skill | — |
+
+- Prose gates facts, pixels gate the look. Nothing is built before the script is APPROVED.
+- `facts.md` or it isn't on screen: every number has a source and a kind (result · target · illustrative · stated).
+- Fix the highest artifact that caused a problem (script → timeline → code), not the pixel.
 
 ## Render contract
 - Every film is a pure function of time: `window.seek(t)` paints frame t.
@@ -57,6 +85,9 @@ Formats: `9x16` (1080x1920, default), `1x1`, `16x9`, `4x5`. Output: `films/<name
 - In-scene motion: closed-form springs only (`springP(t, 'snappy'|'base'|'heavy'|'playful')`). No linear tweens.
   Seams are the exception: mirrored power eases via `cutCurve()` / `zoomThrough()`.
   Tiny overshoot on UI, none on type. Any value with more than one target uses `track()`.
+- One personality per film (premium · corporate · energetic · playful). Investor and finance films: premium,
+  `springV(t, 0.35–0.6, 0)`, no overshoot anywhere. Exits last 65–75 % of their entrance; duration grows with
+  distance (×1.3 for double the distance).
 - Text inside a morphing container: `swapAlpha()` + clip to the shape.
 - The last frame equals the first when the piece loops (positions and velocities).
 
@@ -86,6 +117,8 @@ Formats: `9x16` (1080x1920, default), `1x1`, `16x9`, `4x5`. Output: `films/<name
 - **Hand-drawn / character films** are the exception: there idle life and line boil ARE the medium
   (see `references/ClaudeAnimationBase/ANIMATION_GUIDE.md`).
 - **Stillness before climax:** 0.3–0.75s pause between a major action and its result.
+- One hero at a time; everything else dims to 40–60 %. Never more than a third of the elements moving at once,
+  and nothing travels more than a third of the frame without a change of key.
 - Reactions ignite on the same frame as their cause.
 - Single entry ≤ ~0.8s; longer buildups are staggers. Total stagger ≤ 0.5s. Cascades overlap, they
   don't queue: `waterfall()` (gaps shrink ×0.84), heavier elements travel further. Arrivals are binary-on
@@ -119,6 +152,8 @@ Formats: `9x16` (1080x1920, default), `1x1`, `16x9`, `4x5`. Output: `films/<name
 - Brand work: real screenshots, logo, colors and fonts (Playwright into `assets/`). Never invent UI.
 
 ## Timing: write the reads
+- Frame 0 is the cover: the promise readable, one dominant hero, real content — never a pre-animation empty state.
+- Every text stays readable at least max(0.7 s, 0.25 + chars/17) the first time it shows (`npm run qa` checks it).
 For every shot, list what the viewer must understand, in order. Each read needs time to be found,
 understood and registered before the next one starts. One read at a time; fast actions, held
 meanings; lead the eye before an important read. Let the reads set the shot length.
@@ -139,6 +174,10 @@ meanings; lead the eye before an important read. Let the reads set the shot leng
 - Trust the beat grid only when the music is genuinely rhythmic. On calm tracks the grid is a metronome
   the tracker imposed: pace by `energy` (beats.json, 2 Hz) and phrases, and never hard-cut to it.
 - Audio is the clock: re-time picture to the music (or VO), never rush a read to fit a slot.
+- With a voice-over, the voice is the clock: one audio per line, scene lengths come from the measured voice plus a
+  pad, every cue is anchored to the word that causes it (`"@l4:turns"`), things to read land 0.02–0.06 s early.
+  Never show words different from the ones being said. The music ducks under the voice (finalize does it);
+  silence the music 1–3 s before the payoff and put the loudest hit on it.
 - Shot count tracks distinct treatments, not beats — extra density goes inside a shot.
 
 ## Loop before you show me anything
@@ -146,8 +185,8 @@ meanings; lead the eye before an important read. Let the reads set the shot leng
    warnings and open the marked PNGs: fix what is real, say why the rest is intended.
 2. `npm run draft` + `npm run review`, then OPEN contact.png and phone.png and LOOK at them.
    Use `--at <t>` for a strip around any fast action.
-3. Independent critic: a fresh subagent that only sees the render and the QA report
-   (`prompts/07-independent-critic.md`) scores it. The builder never grades its own film.
+3. Independent critics: fresh subagents that only see the render and the QA report
+   (`prompts/15-critics.md`, or `07-independent-critic.md` for a quick pass). The builder never grades its own film.
 4. Score 1-10: hook in first 2s · readability at phone size · motion quality · variety ·
    composition · brand accuracy · sound sync. Log in `docs/review_log.md`.
    Check every seam with a strip (`--at <cut time>`): no empty frames around the cut, same direction both sides.

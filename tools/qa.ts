@@ -3,6 +3,7 @@
 // Layout (every fillText/strokeText is recorded, blocks or not): text cut by the frame, text crowding
 //   the edge, texts on top of each other, text across the border of a card or chip, low contrast
 //   against the real pixels behind them.
+// Reading: every text stays on screen at least max(0.7 s, 0.25 + chars/17).
 // Frames: empty frames, holds where nothing moves for longer than --hold seconds.
 // Seam gate (each scene `from` in timeline.json): empty frames at the cut, a side at rest (dead beat),
 //   direction or Z sign flipping across the cut.
@@ -248,6 +249,22 @@ for (const fmt of formats) {
   }
   // a layout problem has to last 2 samples to count (single-frame entry overshoots are not layout)
   const kept: Issue[] = issues.filter((i) => i.kind === 'vacío' || i.to - i.from >= 0.99 / FPS);
+  // Reading time: each text must stay readable for max(0.7 s, 0.25 + chars/17) the first time it shows
+  // (counters and numbers excluded; a text that comes back was already read)
+  const seen = new Map<string, number>(), read = new Set<string>();
+  for (const [n, { t, r }] of [...samples, { t: dur, r: { texts: [] } as any }].entries()) {
+    const now = new Set<string>(r.texts.filter((x: any) => x.alpha >= 0.6 && /[a-záéíóúñ]{2}/i.test(x.s)).map((x: any) => x.s));
+    for (const s of now) if (!seen.has(s)) seen.set(s, t);
+    for (const [s, t0] of [...seen]) {
+      if (now.has(s)) continue;
+      seen.delete(s);
+      if (read.has(s)) continue;
+      read.add(s);
+      const need = Math.max(0.7, 0.25 + s.length / 17), had = t - t0;
+      if (had + 0.5 / FPS < need && n < samples.length) kept.push({ level: 'warn', kind: 'lectura', from: t0, to: t,
+        what: `${JSON.stringify(s.length > 40 ? s.slice(0, 40) + '…' : s)} visible ${had.toFixed(1)}s, necesita ${need.toFixed(1)}s` });
+    }
+  }
   // Holds: runs where no pixel of the thumbnail visibly changes (a small packet in flight still counts)
   let holdFrom: number | null = null;
   for (const { t, r } of [...samples, { t: dur, r: { moved: Infinity } as any }]) {

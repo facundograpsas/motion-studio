@@ -1,12 +1,14 @@
 // Voice-over as the film's clock. The whole script is one read, the way a narrator reads it: one ElevenLabs call
 // (cached by content). A line whose "gap" is at least `breath` (default 0.6 s) gets a planned pause written into the
 // text (<break time="1.2s" />), so the narrator pauses inside the same take — separate calls sound like cuts.
-// Only a line with "at" (a fixed start time) starts a separate take.
+// Only a line with "at" (a fixed start time) starts a separate take. Lines with "take": "takes/x.wav" use that file
+// instead — a take chosen by ear (another model, acting tags, several tries); its word timings come from
+// ElevenLabs forced alignment, and the line's "gap" is the silence before it.
 // Word timings come from the API's character alignment and are cut back into lines; timeline.src.json references
 // are resolved into timeline.json.
 // node tools/vo.ts films/<name> [--fit]
 //   --fit   no API calls: estimate from the words (vo.json "wpm", default 160, + pauses) to check the script fits
-// Input  audio/vo.json   { voice, model?, settings?, start?, breath?, wpm?, lines: [{ id, text, gap?, at? }] }
+// Input  audio/vo.json   { voice, model?, settings?, start?, breath?, wpm?, lines: [{ id, text, gap?, at?, take? }] }
 //        timeline.src.json (optional) — like timeline.json, but any string "@ref" is resolved:
 //          "@l3" line start · "@l3.end" line end · "@l3:finds" start of that word (· "#2" second one)
 //          "@end" last line's end · any of them + an offset: "@l3:finds+0.2", "@l2.end-0.1"
@@ -15,7 +17,7 @@
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { basename, join, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
 
 const { positionals, values: opt } = parseArgs({ allowPositionals: true, options: { fit: { type: 'boolean', default: false } } });
@@ -54,6 +56,43 @@ function estimate(text: string) {
   });
 }
 
+function apiKey() {
+  if (!process.env.ELEVENLABS_API_KEY && existsSync(join(ROOT, '.env'))) process.loadEnvFile(join(ROOT, '.env'));
+  const key = process.env.ELEVENLABS_API_KEY;
+  if (!key) throw new Error('ELEVENLABS_API_KEY is not set (.env)');
+  return key;
+}
+
+// A take chosen by ear: word timings from ElevenLabs forced alignment (cached by file content + text)
+async function align(file: string, text: string) {
+  const bytes = readFileSync(file);
+  const hash = createHash('sha1').update(bytes).update(text).digest('hex').slice(0, 12);
+  const meta = join(audio, 'vo', `take-${basename(file)}.json`);
+  const dur = Number(spawnSync('ffprobe', ['-v', 'error', '-show_entries', 'format=duration', '-of', 'csv=p=0', file]).stdout.toString());
+  let aligned: { text: string; start: number; end: number }[], fresh = false;
+  const cached = existsSync(meta) ? JSON.parse(readFileSync(meta, 'utf8')) : null;
+  if (cached?.hash === hash) aligned = cached.words;
+  else {
+    const form = new FormData();
+    form.append('text', text); form.append('file', new Blob([bytes]), basename(file));
+    const r = await fetch('https://api.elevenlabs.io/v1/forced-alignment', { method: 'POST', headers: { 'xi-api-key': apiKey() }, body: form });
+    if (!r.ok) throw new Error(`ElevenLabs forced alignment ${r.status} on ${file}: ${(await r.text()).slice(0, 200)}`);
+    aligned = (await r.json()).words;
+    writeFileSync(meta, JSON.stringify({ hash, text, words: aligned }));
+    fresh = true;
+  }
+  // place each aligned word at its character offset in the text, so takes cut into lines like synthesized ones
+  const lower = text.toLowerCase(), words: Word[] = [];
+  let cur = 0;
+  for (const a of aligned) {
+    const w = a.text.trim(), i = w ? lower.indexOf(w.toLowerCase(), cur) : -1;
+    if (i < 0 || !keyOf(w)) continue;
+    cur = i + w.length;
+    words.push({ w, key: keyOf(w), from: a.start, to: a.end, at: i });
+  }
+  return { words, dur, mp3: file, fresh };
+}
+
 async function synth(id: string, text: string, previous: string, next: string) {
   const hash = createHash('sha1').update(JSON.stringify([cfg.voice, model, settings, text, previous, next])).digest('hex').slice(0, 12);
   const meta = join(audio, 'vo', `${id}.json`), mp3 = join(audio, 'vo', `${id}.mp3`);
@@ -61,11 +100,8 @@ async function synth(id: string, text: string, previous: string, next: string) {
     const cached = JSON.parse(readFileSync(meta, 'utf8'));
     if (cached.hash === hash) return { words: wordsFrom(cached.alignment), dur: cached.duration, mp3, fresh: false };
   }
-  if (!process.env.ELEVENLABS_API_KEY && existsSync(join(ROOT, '.env'))) process.loadEnvFile(join(ROOT, '.env'));
-  const key = process.env.ELEVENLABS_API_KEY;
-  if (!key) throw new Error('ELEVENLABS_API_KEY is not set (.env)');
   const r = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${cfg.voice}/with-timestamps?output_format=mp3_44100_128`, {
-    method: 'POST', headers: { 'xi-api-key': key, 'content-type': 'application/json' },
+    method: 'POST', headers: { 'xi-api-key': apiKey(), 'content-type': 'application/json' },
     body: JSON.stringify({ text, model_id: model, voice_settings: settings, previous_text: previous || undefined, next_text: next || undefined }),
   });
   if (!r.ok) throw new Error(`ElevenLabs ${r.status} on paragraph ${id}: ${(await r.text()).slice(0, 200)}`);
@@ -76,19 +112,20 @@ async function synth(id: string, text: string, previous: string, next: string) {
   return { words: wordsFrom(d.alignment), dur: duration, mp3, fresh: true };
 }
 
-// ---- Takes: one for the whole script, unless a line pins its start with "at"
+// ---- Takes: one for the whole script, unless a line pins its start with "at" or uses a take file
 mkdirSync(join(audio, 'vo'), { recursive: true });
 const breath = cfg.breath ?? 0.6;
-const paras: { lines: any[]; gap: number; at?: number }[] = [];
+const paras: { lines: any[]; gap: number; at?: number; take?: string }[] = [];
 for (const [i, l] of cfg.lines.entries()) {
-  if (i === 0 || typeof l.at === 'number') paras.push({ lines: [], gap: l.gap ?? breath, at: l.at });
+  if (i === 0 || typeof l.at === 'number' || (l.take ?? '') !== (cfg.lines[i - 1].take ?? ''))
+    paras.push({ lines: [], gap: l.gap ?? breath, at: l.at, take: l.take });
   paras.at(-1)!.lines.push(l);
 }
-// the take's text: lines joined by a space, or by a written pause before a line with a planned silence
-const joinTake = (ls: any[]) => {
+// the take's text: lines joined by a space, or (synthesized takes) by a written pause before a planned silence
+const joinTake = (ls: any[], plain = false) => {
   let text = '';
   const offs = ls.map((l, i) => {
-    if (i > 0) text += (l.gap ?? 0) >= breath ? ` <break time="${Math.min(3, l.gap).toFixed(1)}s" /> ` : ' ';
+    if (i > 0) text += !plain && (l.gap ?? 0) >= breath ? ` <break time="${Math.min(3, l.gap).toFixed(1)}s" /> ` : ' ';
     const at = text.length; text += l.text; return at;
   });
   return { text, offs };
@@ -98,7 +135,7 @@ let t = cfg.start ?? 0.5, calls = 0;
 for (const [p, para] of paras.entries()) {
   if (p > 0) t += para.gap;
   if (typeof para.at === 'number') t = para.at;
-  const { text, offs } = joinTake(para.lines);
+  const { text, offs } = joinTake(para.lines, !!para.take);
   let words: Word[], dur: number;
   if (opt.fit) {   // estimate each line on its own and add the planned pauses
     words = []; let tt = 0;
@@ -111,7 +148,7 @@ for (const [p, para] of paras.entries()) {
   }
   else {
     const prev = paras[p - 1] ? joinTake(paras[p - 1].lines).text : '', next = paras[p + 1] ? joinTake(paras[p + 1].lines).text : '';
-    const s = await synth(`p${String(p + 1).padStart(2, '0')}`, text, prev, next);
+    const s = para.take ? await align(join(audio, para.take), text) : await synth(`p${String(p + 1).padStart(2, '0')}`, text, prev, next);
     words = s.words; dur = s.dur; clips.push({ mp3: s.mp3, at: t }); calls += +s.fresh;
   }
   // cut the take back into its lines by character offset (the alignment covers the pause tags too; they fall

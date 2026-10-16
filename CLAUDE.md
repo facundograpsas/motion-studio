@@ -175,7 +175,10 @@ meanings; lead the eye before an important read. Let the reads set the shot leng
   the tracker imposed: pace by `energy` (beats.json, 2 Hz) and phrases, and never hard-cut to it.
 - Audio is the clock: re-time picture to the music (or VO), never rush a read to fit a slot.
 - With a voice-over, the voice is the clock: the whole script is one take (line by line, or paragraph by
-  paragraph, sounds like cuts); planned silences are written into the text as pauses (`gap` ≥ `breath`), scene lengths come from the measured voice plus a
+  paragraph, sounds like cuts); planned silences are written into the text as pauses (`gap` ≥ `breath`).
+  A take picked by ear (Eleven v3 acting tags like `[dry]`, `[confident, emphatic]`, CAPS for stress, several
+  tries) goes in `audio/takes/` and its lines get `"take": "takes/x.wav"`: it is frozen and only aligned (forced
+  alignment), never regenerated. Freeze an approved read the same way before editing lines around it., scene lengths come from the measured voice plus a
   pad, every cue is anchored to the word that causes it (`"@l4:turns"`), things to read land 0.02–0.06 s early.
   Never show words different from the ones being said. The music ducks under the voice (finalize does it);
   silence the music 1–3 s before the payoff and put the loudest hit on it.
